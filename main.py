@@ -110,9 +110,11 @@ SUBTITLE_LANGUAGES = ["eng"]
 DUPLICATE_ACTION = "skip"
 
 # The width and height of the output video, in the format 
-# "1280x720". A value of "auto" is also accepted, and will 
-# preserve the input video dimensions. On the command line, 
-# specify as "-d 1280x720" or "-d auto"
+# "1280x720". "1080p" and "720p" are common values and 
+# translate to 1920x1080 and 1280x720, respectively. 
+# A value of "auto" is also accepted, and will preserve 
+# the input video dimensions. On the command line, specify 
+# as "-d 1280x720", "-d 720p", or "-d auto"
 OUTPUT_DIMENSIONS = "auto"
 
 # Set this to true to search sub-directories within the input 
@@ -403,8 +405,13 @@ def get_handbrake_args(input_path, output_path, audio_index, subtitle_index, vid
 
 
 def parse_output_dimensions(value):
+    value = value.lower()
     if value == "auto":
         return value
+    if value == "1080p":
+        return (1920, 1080)
+    if value == "720p":
+        return (1280, 720)
     match = re.match("^(\d+)x(\d+)$", value)
     if not match:
         raise argparse.ArgumentTypeError(value + " is not a valid video dimension value")
@@ -414,6 +421,7 @@ def parse_output_dimensions(value):
 
 
 def parse_duplicate_action(value):
+    value = value.lower()
     if value not in {"prompt", "skip", "overwrite"}:
         raise argparse.ArgumentTypeError(value + " is not a valid duplicate action")
     return value
