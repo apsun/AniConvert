@@ -23,6 +23,7 @@ try:
 except NameError:
     pass
 
+# textwrap.indent() for Python pre-3.3
 try:
     indent_text = textwrap.indent
 except AttributeError:
@@ -57,8 +58,8 @@ DEFAULT_OUTPUT_SUFFIX = "-converted"
 #   -o <output>
 #   -a <audio track>
 #   -s <subtitle track>
-#   -X <width>
-#   -Y <height>
+#   -w <width>
+#   -l <height>
 # Obviously, do not define anything that would cause HandBrake 
 # to not convert the video file either.
 HANDBRAKE_ARGS = """
@@ -444,6 +445,8 @@ def main():
     args.input_dir = os.path.abspath(args.input_dir)
     if not args.output_dir:
         args.output_dir = args.input_dir + DEFAULT_OUTPUT_SUFFIX
+    else:
+        args.output_dir = os.path.abspath(args.output_dir)
 
     for subdir, filenames in get_videos_in_dir(args.input_dir, args.recursive_search):
         if args.check_all_files:
@@ -476,9 +479,12 @@ def main():
             try_create_directory(os.path.dirname(output_path))
 
             handbrake_args = get_handbrake_args(
-                file_path, output_path, 
-                audio_track.index, subtitle_track.index, 
-                args.output_dimensions)
+                file_path, 
+                output_path, 
+                audio_track.index, 
+                subtitle_track.index, 
+                args.output_dimensions
+            )
 
             try:
                 run_handbrake(handbrake_args)
