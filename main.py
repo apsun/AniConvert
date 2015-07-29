@@ -405,14 +405,14 @@ def get_handbrake_args(input_path, output_path, audio_index, subtitle_index, vid
 
 
 def parse_output_dimensions(value):
-    value = value.lower()
-    if value == "auto":
-        return value
-    if value == "1080p":
+    value_lower = value.lower()
+    if value_lower == "auto":
+        return value_lower
+    if value_lower == "1080p":
         return (1920, 1080)
-    if value == "720p":
+    if value_lower == "720p":
         return (1280, 720)
-    match = re.match("^(\d+)x(\d+)$", value)
+    match = re.match("^(\d+)x(\d+)$", value_lower)
     if not match:
         raise argparse.ArgumentTypeError(value + " is not a valid video dimension value")
     width = int(match.group(1))
@@ -421,10 +421,10 @@ def parse_output_dimensions(value):
 
 
 def parse_duplicate_action(value):
-    value = value.lower()
-    if value not in {"prompt", "skip", "overwrite"}:
+    value_lower = value.lower()
+    if value_lower not in {"prompt", "skip", "overwrite"}:
         raise argparse.ArgumentTypeError(value + " is not a valid duplicate action")
-    return value
+    return value_lower
 
 
 def parse_language_arg(value):
