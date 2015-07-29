@@ -351,6 +351,19 @@ def prompt_select_track(track_list, header_printer):
             continue
 
 
+def prompt_overwrite_file(filename):
+    print("The following file already exists: " + filename)
+    while True:
+        print("Do you want to overwrite it? (y/n): ", end="")
+        input_str = input().lower()
+        if input_str == "y":
+            return True
+        elif input_str == "n":
+            return False
+        else:
+            print("Enter either 'y' or 'n'!")
+
+
 def select_best_track(track_list, preferred_languages, header_printer):
     filtered_tracks = filter_tracks_by_language(track_list, preferred_languages)
     if len(filtered_tracks) == 1:
@@ -453,6 +466,12 @@ def main():
         for filename in filenames:
             file_path = os.path.join(subdir, filename)
             output_path = get_output_path(args.output_dir, args.input_dir, file_path)
+
+            if os.path.exists(output_path):
+                if args.duplicate_action == "skip":
+                    continue
+                elif args.duplicate_action == "prompt" and not prompt_overwrite_file(filename):
+                    continue
 
             try_create_directory(os.path.dirname(output_path))
 
