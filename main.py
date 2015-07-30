@@ -9,9 +9,11 @@
 # Copyright (c) 2015 Andrew Sun (@crossbowffs)
 # Distributed under the MIT license
 ###############################################################
-from __future__ import print_function
+
+from __future__ import print_function, unicode_literals
 import argparse
 import errno
+import logging
 import os
 import re
 import subprocess
@@ -22,6 +24,9 @@ import subprocess
 
 # Path to the HandBrake CLI binary.
 HANDBRAKE_PATH = "/usr/bin/HandBrakeCLI"
+
+# The format string for logging messages
+LOGGING_FORMAT = "[%(levelname)s] %(message)s"
 
 # List of video formats to process. Other file formats in the 
 # input directory will be ignored.
@@ -111,8 +116,16 @@ RECURSIVE_SEARCH = False
 # output if the format differs across videos.
 CHECK_ALL_FILES = False
 
+# The minimum severity for an event to be logged. Levels are 
+# from least severe to most servere are "debug", "info", 
+# "warning", "error", and "critical". On the command line, 
+# specify as "-l info"
+LOGGING_LEVEL = "info"
 
-# Use raw_input() in Python 2
+###############################################################
+# End of configuration values, code begins here
+###############################################################
+
 try:
     input = raw_input
 except NameError:
@@ -127,11 +140,9 @@ class HandBrakeAudioInfo:
         match = self.pattern1.match(info_str)
         if not match:
             raise ValueError("Unknown audio track info format: " + repr(info_str))
-
         self.index = int(match.group(1))
         self.description = match.group(2)
         self.language_code = match.group(3)
-
         match = self.pattern2.match(info_str)
         if match:
             self.sample_rate = int(match.group(4))
@@ -188,7 +199,6 @@ class HandBrakeSubtitleInfo:
         match = self.pattern.match(info_str)
         if not match:
             raise ValueError("Unknown subtitle track info format: " + repr(info_str))
-
         self.index = int(match.group(1))
         self.language = match.group(2)
         self.language_code = match.group(3)
@@ -229,30 +239,55 @@ class HandBrakeSubtitleInfo:
         )
 
 
+class HandBrakeTrackInfo:
+    def __init__(self, audio_tracks, subtitle_tracks):
+        self.audio_tracks = tuple(audio_tracks)
+        self.subtitle_tracks = tuple(subtitle_tracks)
+
+    def __hash__(self):
+        return hash((
+            self.audio_tracks,
+            self.subtitle_tracks
+        ))
+
+    def __eq__(self, other):
+        if not isinstance(other, HandBrakeTrackInfo):
+            return False
+        return (
+            self.audio_tracks == other.audio_tracks and 
+            self.subtitle_tracks == other.subtitle_tracks
+        )
+
+
 def indent_text(text, prefix):
+    if isinstance(prefix, int):
+        prefix = " " * prefix
     lines = text.splitlines()
     return "\n".join(prefix + line for line in lines)
 
 
 def get_videos_in_dir(path, recursive):
     video_extensions = {f.lower() for f in INPUT_VIDEO_FORMATS}
-    for (dirpath, subdirnames, filenames) in os.walk(path):
+    for (dir_path, subdir_names, file_names) in os.walk(path):
         filtered_files = []
-        for filename in filenames:
-            extension = os.path.splitext(filename)[1][1:]
+        for file_name in file_names:
+            extension = os.path.splitext(file_name)[1][1:]
             if extension.lower() in video_extensions:
-                filtered_files.append(filename)
+                filtered_files.append(file_name)
         if len(filtered_files) > 0:
-            yield (dirpath, sorted(filtered_files))
-        if not recursive:
-            del subdirnames[:]
+            filtered_files.sort()
+            yield (dir_path, filtered_files)
+        if recursive:
+            subdir_names.sort()
+        else:
+            del subdir_names[:]
 
 
 def get_output_path(base_output_dir, base_input_dir, input_path):
-    relpath = os.path.relpath(input_path, base_input_dir)
-    temppath = os.path.join(base_output_dir, relpath)
-    outpath = os.path.splitext(temppath)[0] + "." + OUTPUT_VIDEO_FORMAT
-    return outpath
+    relative_path = os.path.relpath(input_path, base_input_dir)
+    temp_path = os.path.join(base_output_dir, relative_path)
+    out_path = os.path.splitext(temp_path)[0] + "." + OUTPUT_VIDEO_FORMAT
+    return out_path
 
 
 def try_create_directory(path, permissions=0o644):
@@ -280,14 +315,14 @@ def run_handbrake_scan(input_path):
     return output.decode("utf-8")
 
 
-def parse_track_info(lines, start_index, cls):
+def parse_track_info(output_lines, start_index, info_cls):
     prefix = "    + "
     prefix_len = len(prefix)
     tracks = []
     i = start_index + 1
-    while lines[i].startswith(prefix):
-        info_str = lines[i][prefix_len:]
-        info = cls(info_str)
+    while output_lines[i].startswith(prefix):
+        info_str = output_lines[i][prefix_len:]
+        info = info_cls(info_str)
         tracks.append(info)
         i += 1
     return (i, tracks)
@@ -304,7 +339,7 @@ def parse_handbrake_scan_output(output):
         if lines[i] == "  + subtitle tracks:":
             i, subtitle_tracks = parse_track_info(lines, i, HandBrakeSubtitleInfo)
         i += 1
-    return (audio_tracks, subtitle_tracks)
+    return HandBrakeTrackInfo(audio_tracks, subtitle_tracks)
 
 
 def get_track_info(input_path):
@@ -324,14 +359,14 @@ def filter_tracks_by_language(track_list, preferred_languages):
 def prompt_select_audio_track(track_list):
     for track in track_list:
         print("Audio track #{0}:".format(track.index))
-        print(indent_text(str(track), "    "))
+        print(indent_text(str(track), 4))
     return prompt_select_track(track_list)
 
 
 def prompt_select_subtitle_track(track_list):
     for track in track_list:
         print("Subtitle track #{0}:".format(track.index))
-        print(indent_text(str(track), "    "))
+        print(indent_text(str(track), 4))
     return prompt_select_track(track_list)
 
 
@@ -348,11 +383,10 @@ def prompt_select_track(track_list):
             return get_track_by_index(track_list, track_index)
         except IndexError:
             print("Enter a valid index!")
-            continue
 
 
-def prompt_overwrite_file(filename):
-    print("The following file already exists: " + filename)
+def prompt_overwrite_file(file_name):
+    print("The following file already exists: " + file_name)
     while True:
         print("Do you want to overwrite it? (y/n): ", end="")
         input_str = input().lower()
@@ -382,13 +416,21 @@ def get_track_by_index(track_list, track_index):
     raise IndexError("Invalid track index: " + str(track_index))
 
 
-def check_video_files(file_list):
-    # TODO: Do something here
-    pass
+def check_video_files(dir_path, file_names):
+    logging.info("Checking videos in '%s'", dir_path)
+    track_info_set = set()
+    for file_name in file_names:
+        logging.info("Checking '%s'", file_name)
+        file_path = os.path.join(dir_path, file_name)
+        track_info = get_track_info(file_path)
+        track_info_set.add(track_info)
+        if len(track_info_set) > 1:
+            return False
+    return True
 
 
 def run_handbrake(arg_list):
-    subprocess.check_call([HANDBRAKE_PATH] + arg_list)
+    subprocess.check_call([HANDBRAKE_PATH] + arg_list, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     # TODO: Error checking and whatnot
 
 
@@ -414,7 +456,7 @@ def parse_output_dimensions(value):
         return (1280, 720)
     match = re.match("^(\d+)x(\d+)$", value_lower)
     if not match:
-        raise argparse.ArgumentTypeError(repr(value) + " is not a valid video dimension value")
+        raise argparse.ArgumentTypeError("Invalid video dimensions: " + repr(value))
     width = int(match.group(1))
     height = int(match.group(2))
     return (width, height)
@@ -423,32 +465,47 @@ def parse_output_dimensions(value):
 def parse_duplicate_action(value):
     value_lower = value.lower()
     if value_lower not in {"prompt", "skip", "overwrite"}:
-        raise argparse.ArgumentTypeError(repr(value) + " is not a valid duplicate action")
+        raise argparse.ArgumentTypeError("Invalid duplicate action: " + repr(value))
     return value_lower
 
 
-def parse_language_arg(value):
+def parse_language_list(value):
     language_list = value.split(",")
+    language_list_lower = []
     for language in language_list:
         if len(language) != 3 or not language.isalpha():
-            raise argparse.ArgumentTypeError(repr(language) + " is not a valid iso639-2 code")
+            raise argparse.ArgumentTypeError("Invalid iso639-2 code: " + repr(language))
+        language_list_lower.append(language.lower())
         # TODO: Maybe add some real validation here?
-    return language_list
+    return language_list_lower
 
 
-def main():
+def parse_logging_level(value):
+    level = getattr(logging, value.upper(), None)
+    if level is None:
+        argparse.ArgumentTypeError("Invalid logging level: " + repr(value))
+    return level
+
+
+def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("input_dir")
     parser.add_argument("-o", "--output-dir")
+    parser.add_argument("-l", "--logging-level", type=parse_logging_level, default=LOGGING_LEVEL)
     parser.add_argument("-w", "--duplicate-action", type=parse_duplicate_action, default=DUPLICATE_ACTION)
     parser.add_argument("-d", "--output-dimensions", type=parse_output_dimensions, default=OUTPUT_DIMENSIONS)
     parser.add_argument("-r", "--recursive-search", action="store_true", default=RECURSIVE_SEARCH)
     parser.add_argument("-c", "--check-all-files", action="store_true", default=CHECK_ALL_FILES)
-    parser.add_argument("-A", "--audio-languages", type=parse_language_arg, default=AUDIO_LANGUAGES)
-    parser.add_argument("-S", "--subtitle-languages", type=parse_language_arg, default=SUBTITLE_LANGUAGES)
+    parser.add_argument("-A", "--audio-languages", type=parse_language_list, default=AUDIO_LANGUAGES)
+    parser.add_argument("-S", "--subtitle-languages", type=parse_language_list, default=SUBTITLE_LANGUAGES)
     parser.add_argument("-a", "--audio-index", type=int)
     parser.add_argument("-s", "--subtitle-index", type=int)
-    args = parser.parse_args()
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
+    logging.basicConfig(format=LOGGING_FORMAT, level=args.logging_level)
 
     args.input_dir = os.path.abspath(args.input_dir)
     if not args.output_dir:
@@ -456,12 +513,15 @@ def main():
     else:
         args.output_dir = os.path.abspath(args.output_dir)
 
-    for subdir, filenames in get_videos_in_dir(args.input_dir, args.recursive_search):
-        if args.check_all_files:
-            check_video_files()
+    for dir_path, file_names in get_videos_in_dir(args.input_dir, args.recursive_search):
+        if args.check_all_files and not check_video_files(dir_path, file_names):
+            logging.error("Track layout mismatch, aborting!")
+            return
 
         # TODO: Change this according to args.check_all_files
-        audio_tracks, subtitle_tracks = get_track_info(os.path.join(subdir, filenames[0]))
+        track_info = get_track_info(os.path.join(dir_path, file_names[0]))
+        audio_tracks = track_info.audio_tracks
+        subtitle_tracks = track_info.subtitle_tracks
 
         if args.audio_index is not None:
             # TODO: Handle track index not found
@@ -477,32 +537,45 @@ def main():
             subtitle_track = select_best_track(subtitle_tracks, 
                 args.subtitle_languages, prompt_select_subtitle_track)
 
-        for filename in filenames:
-            file_path = os.path.join(subdir, filename)
-            output_path = get_output_path(args.output_dir, args.input_dir, file_path)
+        for file_name in file_names:
+            input_path = os.path.join(dir_path, file_name)
+            output_path = get_output_path(args.output_dir, args.input_dir, input_path)
+            relative_input_path = os.path.relpath(input_path, args.input_dir)
+            relative_output_path = os.path.relpath(output_path, args.output_dir)
 
-            if os.path.exists(output_path):
-                if args.duplicate_action == "skip":
+            logging.info("Converting '%s'", relative_input_path)
+
+            if os.path.isfile(output_path):
+                if args.duplicate_action == "prompt":
+                    if not prompt_overwrite_file(file_name):
+                        continue
+                elif args.duplicate_action == "skip":
+                    logging.info("Destination file '%s' already exists, skipping", relative_output_path)
                     continue
-                elif args.duplicate_action == "prompt" and not prompt_overwrite_file(filename):
-                    continue
+                elif args.duplicate_action == "overwrite":
+                    logging.info("Destination file '%s' already exists, overwriting", relative_output_path)
 
             try_create_directory(os.path.dirname(output_path))
 
             handbrake_args = get_handbrake_args(
-                file_path, 
+                input_path, 
                 output_path, 
                 audio_track.index, 
                 subtitle_track.index, 
                 args.output_dimensions
             )
+            logging.debug("HandBrake args: '%s'", subprocess.list2cmdline(handbrake_args))
 
             try:
                 run_handbrake(handbrake_args)
             except:
+                logging.info("Conversion aborted, cleaning up temporary files")
                 try_delete_file(output_path)
                 raise
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass
