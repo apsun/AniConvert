@@ -73,19 +73,18 @@ HANDBRAKE_ARGS = """
 ###############################################################
 
 # A list of preferred audio languages, ordered from most 
-# to least preferable. If no audio track is explicitly 
-# specified and there is only one audio track in the 
+# to least preferable. If there is only one audio track in the 
 # most preferable language, it will be automatically selected. 
 # If more than one track is in the most preferable language, 
 # you will be prompted to select one. If no tracks are 
 # in the most preferable language, the program will check 
 # the second most preferable language, and so on. This value 
 # should use the iso639-2 (3 letter) language code format.
-# On the command line, specify as "-A jpn,eng"
+# On the command line, specify as "-a jpn,eng"
 AUDIO_LANGUAGES = ["jpn", "eng"]
 
 # This is the same as the preferred audio languages, but 
-# for subtitles. On the command line, specify as "-S eng"
+# for subtitles. On the command line, specify as "-s eng"
 SUBTITLE_LANGUAGES = ["eng"]
 
 # What to do when the destination file already exists. Can be 
@@ -131,6 +130,7 @@ try:
 except NameError:
     pass
 
+
 class FFmpegStreamInfo:
     def __init__(self, stream_index, codec_type, codec_name, language_code, metadata):
         self.stream_index = stream_index
@@ -141,8 +141,8 @@ class FFmpegStreamInfo:
 
 
 class HandBrakeAudioInfo:
-    pattern1 = re.compile(r"(\d+), (.+) \(iso639-2: (\S+)\)")
-    pattern2 = re.compile(r"(\d+), (.+) \(iso639-2: (\S+)\), (\d+)Hz, (\d+)bps")
+    pattern1 = re.compile(r"(\d+), (.+) \(iso639-2: ([a-z]{3})\)")
+    pattern2 = re.compile(r"(\d+), (.+) \(iso639-2: ([a-z]{3})\), (\d+)Hz, (\d+)bps")
 
     def __init__(self, info_str):
         match = self.pattern1.match(info_str)
@@ -169,8 +169,6 @@ class HandBrakeAudioInfo:
             format_str += "\nSample rate: {sample_rate}Hz"
         if self.bit_rate:
             format_str += "\nBit rate: {bit_rate}bps"
-        if self.title:
-            format_str += "\nTitle: {title}"
         return format_str.format(**self.__dict__)
 
     def __repr__(self):
@@ -186,7 +184,8 @@ class HandBrakeAudioInfo:
             self.description,
             self.language_code,
             self.sample_rate,
-            self.language_code
+            self.language_code,
+            self.title
         ))
 
     def __eq__(self, other):
@@ -197,7 +196,8 @@ class HandBrakeAudioInfo:
             self.description == other.description and 
             self.language_code == other.language_code and 
             self.sample_rate == other.sample_rate and 
-            self.language_code == other.language_code
+            self.language_code == other.language_code and 
+            self.title == other.title
         )
 
 
@@ -222,8 +222,6 @@ class HandBrakeSubtitleInfo:
             "Format: {format}\n"
             "Source: {source}"
         )
-        if self.title:
-            format_str += "\nTitle: {title}"
         return format_str.format(**self.__dict__)
 
     def __repr__(self):
@@ -237,7 +235,8 @@ class HandBrakeSubtitleInfo:
             self.language,
             self.language_code,
             self.format,
-            self.source
+            self.source,
+            self.title
         ))
 
     def __eq__(self, other):
@@ -248,7 +247,8 @@ class HandBrakeSubtitleInfo:
             self.language == other.language and 
             self.language_code == other.language_code and 
             self.format == other.format and 
-            self.source == other.source
+            self.source == other.source and 
+            self.title == other.title
         )
 
 
@@ -399,15 +399,24 @@ def parse_handbrake_scan_output(output):
     hb_subtitle_tracks = None
     ff_audio_streams = None
     ff_subtitle_streams = None
+    incremented = False
     i = 0
     while i < len(lines):
-        if lines[i] == "  + audio tracks:":
-            i, hb_audio_tracks = parse_handbrake_track_info(lines, i, HandBrakeAudioInfo)
-        if lines[i] == "  + subtitle tracks:":
-            i, hb_subtitle_tracks = parse_handbrake_track_info(lines, i, HandBrakeSubtitleInfo)
         if lines[i].startswith("Input #0, "):
+            logging.debug("Found FFmpeg stream info")
             i, ff_audio_streams, ff_subtitle_streams = parse_ffmpeg_stream_info(lines, i)
-        i += 1
+            incremented = True
+        if lines[i] == "  + audio tracks:":
+            logging.debug("Found HandBrake audio track info")
+            i, hb_audio_tracks = parse_handbrake_track_info(lines, i, HandBrakeAudioInfo)
+            incremented = True
+        if lines[i] == "  + subtitle tracks:":
+            logging.debug("Found HandBrake subtitle track info")
+            i, hb_subtitle_tracks = parse_handbrake_track_info(lines, i, HandBrakeSubtitleInfo)
+            incremented = True
+        if not incremented:
+            i += 1
+        incremented = False
     merge_track_titles(hb_audio_tracks, ff_audio_streams)
     merge_track_titles(hb_subtitle_tracks, ff_subtitle_streams)
     return HandBrakeTrackInfo(hb_audio_tracks, hb_subtitle_tracks)
@@ -429,14 +438,14 @@ def filter_tracks_by_language(track_list, preferred_languages):
 
 def prompt_select_audio_track(track_list):
     for track in track_list:
-        print("Audio track #{0}:".format(track.index))
+        print("Audio track #{0}: {1}".format(track.index, track.title or ""))
         print(indent_text(str(track), 4))
     return prompt_select_track(track_list)
 
 
 def prompt_select_subtitle_track(track_list):
     for track in track_list:
-        print("Subtitle track #{0}:".format(track.index))
+        print("Subtitle track #{0}: {1}".format(track.index, track.title or ""))
         print(indent_text(str(track), 4))
     return prompt_select_track(track_list)
 
@@ -476,8 +485,7 @@ def select_best_track(track_list, preferred_languages, prompt_func):
     elif len(filtered_tracks) > 1:
         return prompt_func(filtered_tracks)
     else:
-        # TODO: Handle no tracks
-        raise Exception("No tracks found")
+        return None
 
 
 def get_track_by_index(track_list, track_index):
@@ -488,7 +496,7 @@ def get_track_by_index(track_list, track_index):
 
 
 def check_video_files(dir_path, file_names):
-    logging.info("Checking videos in '%s'", dir_path)
+    logging.info("Ensuring all videos have the same track layout")
     track_info_set = set()
     for file_name in file_names:
         logging.info("Checking '%s'", file_name)
@@ -497,10 +505,17 @@ def check_video_files(dir_path, file_names):
         track_info_set.add(track_info)
         if len(track_info_set) > 1:
             return False
+    logging.info("All files passed!")
     return True
 
 
 def run_handbrake(arg_list):
+    pattern1 = re.compile(r"Encoding: task \d+ of \d+, (\d+\.\d\d) %")
+    pattern2 = re.compile(
+        r"Encoding: task \d+ of \d+, (\d+\.\d\d) % "
+        r"\((\d+\.\d\d) fps, avg (\d+\.\d\d) fps, ETA (\d\dh\d\dm\d\ds)\)"
+    )
+
     process = subprocess.Popen(
         [HANDBRAKE_PATH] + arg_list, 
         stdout=subprocess.PIPE, 
@@ -508,19 +523,47 @@ def run_handbrake(arg_list):
         universal_newlines=True
     )
 
+    percent_complete = None
+    current_fps = None
+    average_fps = None
+    estimated_time = None
+    prev_message = ""
+    format_str = "Progress: {percent}% done"
+    long_format_str = "Progress: {percent}% done (FPS: {fps}, average FPS: {avg_fps}, ETA: {eta})"
     while True:
         output = process.stdout.readline()
         if len(output) == 0:
             break
-        # TODO: Parse progress
+        output = output.rstrip()
+        match = pattern1.match(output)
+        if match:
+            percent_complete = float(match.group(1))
+            match = pattern2.match(output)
+            if match:
+                format_str = long_format_str
+                current_fps = float(match.group(2))
+                average_fps = float(match.group(3))
+                estimated_time = match.group(4)
+            message = format_str.format(
+                percent = percent_complete,
+                fps = current_fps,
+                avg_fps = average_fps,
+                eta = estimated_time
+            )
+            print(message, end="")
+            blank_count = max(len(prev_message) - len(message), 0)
+            print(" " * blank_count, end="\r")
+            prev_message = message
 
 
-def get_handbrake_args(input_path, output_path, audio_index, subtitle_index, video_dimensions):
+def get_handbrake_args(input_path, output_path, audio_track, subtitle_track, video_dimensions):
     args = HANDBRAKE_ARGS.replace("\n", " ").strip().split()
     args += ["-i", input_path]
     args += ["-o", output_path]
-    args += ["-a", str(audio_index)]
-    args += ["-s", str(subtitle_index)]
+    if audio_track:
+        args += ["-a", str(audio_track.index)]
+    if subtitle_track:
+        args += ["-s", str(subtitle_track.index)]
     if video_dimensions != "auto":
         args += ["-w", str(video_dimensions[0])]
         args += ["-l", str(video_dimensions[1])]
@@ -577,10 +620,8 @@ def parse_args():
     parser.add_argument("-d", "--output-dimensions", type=parse_output_dimensions, default=OUTPUT_DIMENSIONS)
     parser.add_argument("-r", "--recursive-search", action="store_true", default=RECURSIVE_SEARCH)
     parser.add_argument("-c", "--check-all-files", action="store_true", default=CHECK_ALL_FILES)
-    parser.add_argument("-A", "--audio-languages", type=parse_language_list, default=AUDIO_LANGUAGES)
-    parser.add_argument("-S", "--subtitle-languages", type=parse_language_list, default=SUBTITLE_LANGUAGES)
-    parser.add_argument("-a", "--audio-index", type=int)
-    parser.add_argument("-s", "--subtitle-index", type=int)
+    parser.add_argument("-a", "--audio-languages", type=parse_language_list, default=AUDIO_LANGUAGES)
+    parser.add_argument("-s", "--subtitle-languages", type=parse_language_list, default=SUBTITLE_LANGUAGES)
     return parser.parse_args()
 
 
@@ -595,28 +636,26 @@ def main():
         args.output_dir = os.path.abspath(args.output_dir)
 
     for dir_path, file_names in get_videos_in_dir(args.input_dir, args.recursive_search):
+        relative_dir_path = os.path.relpath(dir_path, args.input_dir)
+        logging.info("Converting videos in '%s'", relative_dir_path)
+
         if args.check_all_files and not check_video_files(dir_path, file_names):
-            logging.error("Track layout mismatch, aborting!")
-            return
+            logging.error("Track layout mismatch, skipping!")
+            continue
 
-        # TODO: Change this according to args.check_all_files
         track_info = get_track_info(os.path.join(dir_path, file_names[0]))
-        audio_tracks = track_info.audio_tracks
-        subtitle_tracks = track_info.subtitle_tracks
 
-        if args.audio_index is not None:
-            # TODO: Handle track index not found
-            audio_track = get_track_by_index(audio_tracks, args.audio_index)
-        else:
-            audio_track = select_best_track(audio_tracks, 
-                args.audio_languages, prompt_select_audio_track)
+        audio_track = select_best_track(
+            track_info.audio_tracks, 
+            args.audio_languages, 
+            prompt_select_audio_track
+        )
 
-        if args.subtitle_index is not None:
-            # TODO: Handle track index not found
-            subtitle_track = get_track_by_index(subtitle_tracks, args.subtitle_index)
-        else:
-            subtitle_track = select_best_track(subtitle_tracks, 
-                args.subtitle_languages, prompt_select_subtitle_track)
+        subtitle_track = select_best_track(
+            track_info.subtitle_tracks, 
+            args.subtitle_languages, 
+            prompt_select_subtitle_track
+        )
 
         for file_name in file_names:
             input_path = os.path.join(dir_path, file_name)
@@ -641,10 +680,11 @@ def main():
             handbrake_args = get_handbrake_args(
                 input_path, 
                 output_path, 
-                audio_track.index, 
-                subtitle_track.index, 
+                audio_track, 
+                subtitle_track, 
                 args.output_dimensions
             )
+
             logging.debug("HandBrake args: '%s'", subprocess.list2cmdline(handbrake_args))
 
             try:
@@ -653,6 +693,10 @@ def main():
                 logging.info("Conversion aborted, cleaning up temporary files")
                 try_delete_file(output_path)
                 raise
+    else:
+        logging.info("No videos found in input directory, are you missing an '-r' option?")
+
+    logging.info("Done!")
 
 
 if __name__ == "__main__":
