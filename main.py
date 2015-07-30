@@ -116,7 +116,7 @@ RECURSIVE_SEARCH = False
 # output if the format differs across videos.
 CHECK_ALL_FILES = False
 
-# The minimum severity for an event to be logged. Levels are 
+# The minimum severity for an event to be logged. Levels  
 # from least severe to most servere are "debug", "info", 
 # "warning", "error", and "critical". On the command line, 
 # specify as "-l info"
@@ -130,6 +130,14 @@ try:
     input = raw_input
 except NameError:
     pass
+
+class FFmpegStreamInfo:
+    def __init__(self, stream_index, codec_type, codec_name, language_code, metadata):
+        self.stream_index = stream_index
+        self.codec_type = codec_type
+        self.codec_name = codec_name
+        self.language_code = language_code
+        self.metadata = metadata
 
 
 class HandBrakeAudioInfo:
@@ -150,18 +158,19 @@ class HandBrakeAudioInfo:
         else:
             self.sample_rate = None
             self.bit_rate = None
+        self.title = None
 
     def __str__(self):
         format_str = (
             "Description: {description}\n"
             "Language code: {language_code}"
         )
-        if self.sample_rate and self.bit_rate:
-            format_str += (
-                "\n"
-                "Sample rate: {sample_rate}Hz\n"
-                "Bit rate: {bit_rate}bps"
-            )
+        if self.sample_rate:
+            format_str += "\nSample rate: {sample_rate}Hz"
+        if self.bit_rate:
+            format_str += "\nBit rate: {bit_rate}bps"
+        if self.title:
+            format_str += "\nTitle: {title}"
         return format_str.format(**self.__dict__)
 
     def __repr__(self):
@@ -204,14 +213,18 @@ class HandBrakeSubtitleInfo:
         self.language_code = match.group(3)
         self.format = match.group(4)
         self.source = match.group(5)
+        self.title = None
 
     def __str__(self):
-        return (
+        format_str = (
             "Language: {language}\n"
             "Language code: {language_code}\n"
             "Format: {format}\n"
             "Source: {source}"
-        ).format(**self.__dict__)
+        )
+        if self.title:
+            format_str += "\nTitle: {title}"
+        return format_str.format(**self.__dict__)
 
     def __repr__(self):
         format_str = "{index}, {language} (iso639-2: {language_code}) ({format})({source})"
@@ -315,12 +328,12 @@ def run_handbrake_scan(input_path):
     return output.decode("utf-8")
 
 
-def parse_track_info(output_lines, start_index, info_cls):
+def parse_handbrake_track_info(output_lines, start_index, info_cls):
     prefix = "    + "
     prefix_len = len(prefix)
     tracks = []
     i = start_index + 1
-    while output_lines[i].startswith(prefix):
+    while i < len(output_lines) and output_lines[i].startswith(prefix):
         info_str = output_lines[i][prefix_len:]
         info = info_cls(info_str)
         tracks.append(info)
@@ -328,18 +341,76 @@ def parse_track_info(output_lines, start_index, info_cls):
     return (i, tracks)
 
 
+def parse_ffmpeg_stream_metadata(output_lines, start_index, metadata_pattern):
+    metadata = {}
+    i = start_index + 1
+    while i < len(output_lines):
+        match = metadata_pattern.match(output_lines[i])
+        if not match:
+            break
+        metadata[match.group(1)] = match.group(2)
+        i += 1
+    return (i, metadata)
+
+
+def parse_ffmpeg_stream_info(output_lines, start_index):
+    stream_pattern = re.compile(r"    Stream #0.(\d+)(\(([a-z]{3})\))?: (\S+): (\S+?)")
+    metadata_pattern = re.compile(r"      (\S+)\s+: (.+)")
+    audio_streams = []
+    subtitle_streams = []
+    i = start_index + 1
+    while i < len(output_lines) and output_lines[i].startswith("  "):
+        match = stream_pattern.match(output_lines[i])
+        if not match:
+            i += 1
+            continue
+        stream_index = match.group(1)
+        language_code = match.group(3)
+        codec_type = match.group(4)
+        codec_name = match.group(5)
+        i += 1
+        if codec_type == "Audio":
+            current_stream = audio_streams
+        elif codec_type == "Subtitle":
+            current_stream = subtitle_streams
+        else:
+            continue
+        if output_lines[i].startswith("    Metadata:"):
+            i, metadata = parse_ffmpeg_stream_metadata(output_lines, i, metadata_pattern)
+        else:
+            metadata = {}
+        info = FFmpegStreamInfo(stream_index, codec_type, codec_name, language_code, metadata)
+        current_stream.append(info)
+    return (i, audio_streams, subtitle_streams)
+
+
+def merge_track_titles(hb_tracks, ff_streams):
+    if not ff_streams:
+        return
+    assert len(hb_tracks) == len(ff_streams)
+    for hb_track, ff_stream in zip(hb_tracks, ff_streams):
+        assert hb_track.language_code == ff_stream.language_code
+        hb_track.title = ff_stream.metadata.get("title")
+
+
 def parse_handbrake_scan_output(output):
     lines = output.splitlines()
-    audio_tracks = None
-    subtitle_tracks = None
+    hb_audio_tracks = None
+    hb_subtitle_tracks = None
+    ff_audio_streams = None
+    ff_subtitle_streams = None
     i = 0
     while i < len(lines):
         if lines[i] == "  + audio tracks:":
-            i, audio_tracks = parse_track_info(lines, i, HandBrakeAudioInfo)
+            i, hb_audio_tracks = parse_handbrake_track_info(lines, i, HandBrakeAudioInfo)
         if lines[i] == "  + subtitle tracks:":
-            i, subtitle_tracks = parse_track_info(lines, i, HandBrakeSubtitleInfo)
+            i, hb_subtitle_tracks = parse_handbrake_track_info(lines, i, HandBrakeSubtitleInfo)
+        if lines[i].startswith("Input #0, "):
+            i, ff_audio_streams, ff_subtitle_streams = parse_ffmpeg_stream_info(lines, i)
         i += 1
-    return HandBrakeTrackInfo(audio_tracks, subtitle_tracks)
+    merge_track_titles(hb_audio_tracks, ff_audio_streams)
+    merge_track_titles(hb_subtitle_tracks, ff_subtitle_streams)
+    return HandBrakeTrackInfo(hb_audio_tracks, hb_subtitle_tracks)
 
 
 def get_track_info(input_path):
@@ -430,8 +501,18 @@ def check_video_files(dir_path, file_names):
 
 
 def run_handbrake(arg_list):
-    subprocess.check_call([HANDBRAKE_PATH] + arg_list, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    # TODO: Error checking and whatnot
+    process = subprocess.Popen(
+        [HANDBRAKE_PATH] + arg_list, 
+        stdout=subprocess.PIPE, 
+        stderr=subprocess.STDOUT, 
+        universal_newlines=True
+    )
+
+    while True:
+        output = process.stdout.readline()
+        if len(output) == 0:
+            break
+        # TODO: Parse progress
 
 
 def get_handbrake_args(input_path, output_path, audio_index, subtitle_index, video_dimensions):
