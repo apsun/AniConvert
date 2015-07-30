@@ -202,7 +202,7 @@ class HandBrakeAudioInfo:
 
 
 class HandBrakeSubtitleInfo:
-    pattern = re.compile(r"(\d+), (.+) \(iso639-2: (\S+)\) \((\S+)\)\((\S+)\)")
+    pattern = re.compile(r"(\d+), (.+) \(iso639-2: ([a-z]{3})\) \((\S+)\)\((\S+)\)")
 
     def __init__(self, info_str):
         match = self.pattern.match(info_str)

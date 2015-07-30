@@ -24,6 +24,10 @@ Yet another batch file converter for [HandBrake](https://handbrake.fr/)
 - Skip files that have already been converted: `aniconvert.py -w skip ...`
 - Any combination of the above, and more!
 
+## License
+
+Distributed under the [MIT License](http://opensource.org/licenses/MIT).
+
 ## FAQ
 
 ### Why is this better than the official HandBrake GUI?
