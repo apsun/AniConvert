@@ -554,6 +554,7 @@ def run_handbrake(arg_list):
             blank_count = max(len(prev_message) - len(message), 0)
             print(" " * blank_count, end="\r")
             prev_message = message
+    print(" " * len(prev_message), end="\r")
 
 
 def get_handbrake_args(input_path, output_path, audio_track, subtitle_track, video_dimensions):
