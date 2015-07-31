@@ -111,13 +111,6 @@ OUTPUT_DIMENSIONS = "auto"
 # folder in the destination directory.
 RECURSIVE_SEARCH = False
 
-# If this is false, only the first video in each directory 
-# will be used to determine the audio and subtitle indices 
-# for all files in the directory. This speeds up the 
-# conversion process a bit, but will cause incorrect 
-# output if the format differs across videos.
-CHECK_ALL_FILES = False
-
 # The minimum severity for an event to be logged. Levels  
 # from least severe to most servere are "debug", "info", 
 # "warning", "error", and "critical". On the command line, 
@@ -132,6 +125,14 @@ try:
     input = raw_input
 except NameError:
     pass
+
+
+class BatchInfo:
+    def __init__(self, dir_path, file_names, audio_track, subtitle_track):
+        self.dir_path = dir_path
+        self.file_names = file_names
+        self.audio_track = audio_track
+        self.subtitle_track = subtitle_track
 
 
 class FFmpegStreamInfo:
@@ -275,43 +276,6 @@ class HandBrakeTrackInfo:
         )
 
 
-def check_handbrake_executable(file_path):
-    if not os.path.isfile(file_path):
-        return False
-    if not os.access(file_path, os.X_OK):
-        logging.warning("Found HandBrakeCLI binary at '%s', but it is not executable", file_path)
-        return False
-    logging.info("Found HandBrakeCLI binary at '%s'", file_path)
-    return True
-
-
-def find_handbrake_executable_path(name):
-    if os.name == "nt" and not name.lower().endswith(".exe"):
-        name += ".exe"
-    path_env = os.environ.get("PATH", os.defpath)
-    path_env_split = path_env.split(os.pathsep)
-    path_env_split.insert(0, os.path.abspath(os.path.dirname(__file__)))
-    for dir_path in path_env_split:
-        file_path = os.path.join(dir_path, name)
-        if check_handbrake_executable(file_path):
-            return file_path
-    return None
-
-
-def find_handbrake_executable():
-    name = HANDBRAKE_EXE
-    if os.path.dirname(name):
-        logging.info("Full path to HandBrakeCLI binary specified, ignoring PATH")
-        if check_handbrake_executable(name):
-            return name
-    else:
-        exe_in_path = find_handbrake_executable_path(name)
-        if exe_in_path:
-            return exe_in_path
-    logging.error("Could not find executable HandBrakeCLI binary")
-    return None
-
-
 def indent_text(text, prefix):
     if isinstance(prefix, int):
         prefix = " " * prefix
@@ -319,13 +283,13 @@ def indent_text(text, prefix):
     return "\n".join(prefix + line for line in lines)
 
 
-def get_videos_in_dir(path, formats, recursive):
-    video_extensions = {f.lower() for f in formats}
+def get_files_in_dir(path, extensions, recursive):
+    extensions = {e.lower() for e in extensions}
     for (dir_path, subdir_names, file_names) in os.walk(path):
         filtered_files = []
         for file_name in file_names:
             extension = os.path.splitext(file_name)[1][1:]
-            if extension.lower() in video_extensions:
+            if extension.lower() in extensions:
                 filtered_files.append(file_name)
         if len(filtered_files) > 0:
             filtered_files.sort()
@@ -334,6 +298,16 @@ def get_videos_in_dir(path, formats, recursive):
             subdir_names.sort()
         else:
             del subdir_names[:]
+
+
+def get_output_dir(base_output_dir, base_input_dir, dir_path):
+    relative_path = os.path.relpath(dir_path, base_input_dir)
+    return os.path.join(base_output_dir, relative_path)
+
+
+def replace_extension(file_name, new_extension):
+    new_file_name = os.path.splitext(file_name)[0] + "." + new_extension
+    return new_file_name
 
 
 def get_output_path(base_output_dir, base_input_dir, input_path, output_format):
@@ -467,6 +441,29 @@ def get_track_info(handbrake_path, input_path):
     return parse_handbrake_scan_output(scan_output)
 
 
+def get_track_info_for_directory(handbrake_path, dir_path, file_names):
+    logging.info("Ensuring all videos have the same track layout")
+    track_info_set = set()
+    for file_name in file_names:
+        logging.info("Checking '%s'", file_name)
+        file_path = os.path.join(dir_path, file_name)
+        track_info = get_track_info(handbrake_path, file_path)
+        track_info_set.add(track_info)
+        # DEBUGGING CODE
+        return track_info_set.pop()
+        if len(track_info_set) > 1:
+            return None
+    logging.info("All files passed!")
+    return track_info_set.pop()
+
+
+def get_track_by_index(track_list, track_index):
+    for track in track_list:
+        if track.index == track_index:
+            return track
+    raise IndexError("Invalid track index: " + str(track_index))
+
+
 def filter_tracks_by_language(track_list, preferred_languages):
     for language in preferred_languages:
         language = language.lower()
@@ -528,27 +525,6 @@ def select_best_track(track_list, preferred_languages, prompt_func):
         return None
 
 
-def get_track_by_index(track_list, track_index):
-    for track in track_list:
-        if track.index == track_index:
-            return track
-    raise IndexError("Invalid track index: " + str(track_index))
-
-
-def check_video_files(dir_path, file_names):
-    logging.info("Ensuring all videos have the same track layout")
-    track_info_set = set()
-    for file_name in file_names:
-        logging.info("Checking '%s'", file_name)
-        file_path = os.path.join(dir_path, file_name)
-        track_info = get_track_info(file_path)
-        track_info_set.add(track_info)
-        if len(track_info_set) > 1:
-            return False
-    logging.info("All files passed!")
-    return True
-
-
 def process_handbrake_output(process):
     pattern1 = re.compile(r"Encoding: task \d+ of \d+, (\d+\.\d\d) %")
     pattern2 = re.compile(
@@ -590,6 +566,7 @@ def process_handbrake_output(process):
 
 
 def run_handbrake(arg_list):
+    logging.debug("HandBrake args: '%s'", subprocess.list2cmdline(arg_list))
     process = subprocess.Popen(
         arg_list, 
         stdout=subprocess.PIPE, 
@@ -602,8 +579,7 @@ def run_handbrake(arg_list):
         process.kill()
         process.wait()
         raise
-    retcode = process.poll()
-    assert retcode is not None
+    retcode = process.wait()
     if retcode != 0:
         raise subprocess.CalledProcessError(retcode, arg_list)
 
@@ -621,6 +597,168 @@ def get_handbrake_args(handbrake_path, input_path, output_path,
         args += ["-w", str(video_dimensions[0])]
         args += ["-l", str(video_dimensions[1])]
     return [handbrake_path] + args
+
+
+def check_handbrake_executable(file_path):
+    if not os.path.isfile(file_path):
+        return False
+    if not os.access(file_path, os.X_OK):
+        logging.warning("Found HandBrakeCLI binary at '%s', but it is not executable", file_path)
+        return False
+    logging.info("Found HandBrakeCLI binary at '%s'", file_path)
+    return True
+
+
+def find_handbrake_executable_in_path(name):
+    if os.name == "nt" and not name.lower().endswith(".exe"):
+        name += ".exe"
+    path_env = os.environ.get("PATH", os.defpath)
+    path_env_split = path_env.split(os.pathsep)
+    path_env_split.insert(0, os.path.abspath(os.path.dirname(__file__)))
+    for dir_path in path_env_split:
+        file_path = os.path.join(dir_path, name)
+        if check_handbrake_executable(file_path):
+            return file_path
+    return None
+
+
+def find_handbrake_executable():
+    name = HANDBRAKE_EXE
+    if os.path.dirname(name):
+        logging.info("Full path to HandBrakeCLI binary specified, ignoring PATH")
+        if check_handbrake_executable(name):
+            return name
+    else:
+        exe_in_path = find_handbrake_executable_in_path(name)
+        if exe_in_path:
+            return exe_in_path
+    logging.error("Could not find executable HandBrakeCLI binary")
+    return None
+
+
+def check_output_path(output_path, relative_output_path):
+    if os.path.isdir(output_path):
+        logging.error("'%s' is a directory, skipping", relative_output_path)
+        return False
+    if os.path.isfile(output_path):
+        if args.duplicate_action == "prompt":
+            if not prompt_overwrite_file(relative_output_path):
+                return False
+        elif args.duplicate_action == "skip":
+            logging.info("Destination file '%s' already exists, skipping", relative_output_path)
+            return False
+        elif args.duplicate_action == "overwrite":
+            logging.info("Destination file '%s' already exists, overwriting", relative_output_path)
+            return True
+    return True
+
+
+def generate_batch(args, dir_path, file_names):
+    dir_name = os.path.basename(dir_path)
+    logging.info("Scanning videos in '%s'", dir_name)
+    output_dir = get_output_dir(args.output_dir, args.input_dir, dir_path)
+    track_info = get_track_info_for_directory(args.handbrake_path, dir_path, file_names)
+    if not track_info:
+        return None
+
+    audio_track = select_best_track(
+        track_info.audio_tracks, 
+        args.audio_languages, 
+        prompt_select_audio_track
+    )
+
+    subtitle_track = select_best_track(
+        track_info.subtitle_tracks, 
+        args.subtitle_languages, 
+        prompt_select_subtitle_track
+    )
+
+    should_convert = []
+    for file_name in file_names:
+        output_file_name = replace_extension(file_name, args.output_format)
+        input_path = os.path.join(dir_path, file_name)
+        output_path = os.path.join(output_dir, output_file_name)
+        relative_input_path = os.path.relpath(input_path, args.input_dir)
+        relative_output_path = os.path.relpath(output_path, args.output_dir)
+
+        if not check_output_path(output_path, relative_output_path):
+            continue
+        should_convert.append(file_name)
+        logging.info("Enqueued '%s'", file_name)
+
+    return BatchInfo(dir_path, should_convert, audio_track, subtitle_track)
+
+
+def generate_batches(args):
+    dir_list = get_files_in_dir(args.input_dir, args.input_formats, args.recursive_search)
+    batch_list = []
+    found = False
+    for dir_path, file_names in dir_list:
+        found = True
+        batch = generate_batch(args, dir_path, file_names)
+        if batch:
+            batch_list.append(batch)
+    if not found:
+        logging.info("No videos found in input directory, are you missing an '-r' option?")
+    return batch_list
+
+
+def execute_batch(args, batch):
+    output_dir = get_output_dir(args.output_dir, args.input_dir, batch.dir_path)
+    try_create_directory(output_dir)
+    for file_name in batch.file_names:
+        output_file_name = replace_extension(file_name, args.output_format)
+        input_path = os.path.join(batch.dir_path, file_name)
+        output_path = os.path.join(output_dir, output_file_name)
+        handbrake_args = get_handbrake_args(
+            args.handbrake_path, 
+            input_path, 
+            output_path, 
+            batch.audio_track, 
+            batch.subtitle_track, 
+            args.output_dimensions
+        )
+        try:
+            run_handbrake(handbrake_args)
+        except subprocess.CalledProcessError as e:
+            logging.error("Error occurred while converting '%s': %s", relative_input_path, e)
+            try_delete_file(output_path)
+        except:
+            logging.info("Conversion aborted, cleaning up temporary files")
+            try_delete_file(output_path)
+            raise
+
+
+def sanitize_and_validate_args(args):
+    args.input_dir = os.path.abspath(args.input_dir)
+    if not args.output_dir:
+        args.output_dir = args.input_dir + DEFAULT_OUTPUT_SUFFIX
+    args.output_dir = os.path.abspath(args.output_dir)
+    if not os.path.exists(args.input_dir):
+        logging.error("Input directory does not exist: '%s'", args.input_dir)
+        return False
+    if os.path.isfile(args.input_dir):
+        logging.error("Input directory is a file: '%s'", args.input_dir)
+        return False
+    if os.path.isfile(args.output_dir):
+        logging.error("Output directory is a file: '%s'", args.output_dir)
+        return False
+    if args.input_dir == args.output_dir:
+        logging.error("Input and output directories are the same: '%s'", args.input_dir)
+        return False
+    if args.handbrake_path:
+        args.handbrake_path = os.path.abspath(args.handbrake_path)
+        if not os.path.isfile(args.handbrake_path):
+            logging.error("HandBrake CLI binary not found: '%s'", args.handbrake_path)
+            return False
+        if not os.access(args.handbrake_path, os.X_OK):
+            logging.error("Insufficient permissions to execute HandBrake: '%s'", args.handbrake_path)
+            return False
+    else:
+        args.handbrake_path = find_handbrake_executable()
+        if not args.handbrake_path:
+            return False
+    return True
 
 
 def parse_output_dimensions(value):
@@ -686,13 +824,13 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("input_dir")
     parser.add_argument("-o", "--output-dir")
+    parser.add_argument("-x", "--handbrake-path")
+    parser.add_argument("-r", "--recursive-search", action="store_true", default=RECURSIVE_SEARCH)
     parser.add_argument("-i", "--input-formats", type=parse_input_formats, default=INPUT_VIDEO_FORMATS)
     parser.add_argument("-j", "--output-format", type=parse_output_format, default=OUTPUT_VIDEO_FORMAT)
     parser.add_argument("-l", "--logging-level", type=parse_logging_level, default=LOGGING_LEVEL)
     parser.add_argument("-w", "--duplicate-action", type=parse_duplicate_action, default=DUPLICATE_ACTION)
     parser.add_argument("-d", "--output-dimensions", type=parse_output_dimensions, default=OUTPUT_DIMENSIONS)
-    parser.add_argument("-r", "--recursive-search", action="store_true", default=RECURSIVE_SEARCH)
-    parser.add_argument("-c", "--check-all-files", action="store_true", default=CHECK_ALL_FILES)
     parser.add_argument("-a", "--audio-languages", type=parse_language_list, default=AUDIO_LANGUAGES)
     parser.add_argument("-s", "--subtitle-languages", type=parse_language_list, default=SUBTITLE_LANGUAGES)
     return parser.parse_args()
@@ -701,82 +839,11 @@ def parse_args():
 def main():
     args = parse_args()
     logging.basicConfig(format=LOGGING_FORMAT, level=args.logging_level)
-    handbrake_path = find_handbrake_executable()
-    if not handbrake_path:
+    if not sanitize_and_validate_args(args):
         return
-
-    args.input_dir = os.path.abspath(args.input_dir)
-    if not args.output_dir:
-        args.output_dir = args.input_dir + DEFAULT_OUTPUT_SUFFIX
-    else:
-        args.output_dir = os.path.abspath(args.output_dir)
-
-    if args.input_dir == args.output_dir:
-        logging.error("Input and output directories are the same")
-        return
-
-    for dir_path, file_names in get_videos_in_dir(args.input_dir, args.input_formats, args.recursive_search):
-        dir_name = os.path.basename(dir_path)
-        logging.info("Converting videos in '%s'", dir_name)
-
-        if args.check_all_files and not check_video_files(dir_path, file_names):
-            logging.error("Track layout mismatch, skipping!")
-            continue
-
-        track_info = get_track_info(handbrake_path, os.path.join(dir_path, file_names[0]))
-
-        audio_track = select_best_track(
-            track_info.audio_tracks, 
-            args.audio_languages, 
-            prompt_select_audio_track
-        )
-
-        subtitle_track = select_best_track(
-            track_info.subtitle_tracks, 
-            args.subtitle_languages, 
-            prompt_select_subtitle_track
-        )
-
-        for file_name in file_names:
-            input_path = os.path.join(dir_path, file_name)
-            output_path = get_output_path(args.output_dir, args.input_dir, input_path, args.output_format)
-            relative_input_path = os.path.relpath(input_path, args.input_dir)
-            relative_output_path = os.path.relpath(output_path, args.output_dir)
-
-            logging.info("Converting '%s'", relative_input_path)
-
-            if os.path.isfile(output_path):
-                if args.duplicate_action == "prompt":
-                    if not prompt_overwrite_file(file_name):
-                        continue
-                elif args.duplicate_action == "skip":
-                    logging.info("Destination file '%s' already exists, skipping", relative_output_path)
-                    continue
-                elif args.duplicate_action == "overwrite":
-                    logging.info("Destination file '%s' already exists, overwriting", relative_output_path)
-
-            try_create_directory(os.path.dirname(output_path))
-
-            handbrake_args = get_handbrake_args(
-                handbrake_path,
-                input_path, 
-                output_path, 
-                audio_track, 
-                subtitle_track, 
-                args.output_dimensions
-            )
-
-            logging.debug("HandBrake args: '%s'", subprocess.list2cmdline(handbrake_args))
-
-            try:
-                run_handbrake(handbrake_args)
-            except:
-                logging.info("Conversion aborted, cleaning up temporary files")
-                try_delete_file(output_path)
-                raise
-    else:
-        logging.info("No videos found in input directory, are you missing an '-r' option?")
-
+    batches = generate_batches(args)
+    for batch in batches:
+        execute_batch(args, batch)
     logging.info("Done!")
 
 
