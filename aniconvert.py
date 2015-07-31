@@ -3,14 +3,14 @@
 # AniConvert: Batch convert directories of videos using 
 # HandBrake. Intended to be used on anime and TV series, 
 # where files downloaded as a batch tend to have the same 
-# file formats. Can also automatically select a single audio 
+# track layout. Can also automatically select a single audio 
 # and subtitle track based on language preference.
 #
 # Copyright (c) 2015 Andrew Sun (@crossbowffs)
 # Distributed under the MIT license
 ###############################################################
 
-from __future__ import print_function, unicode_literals
+from __future__ import print_function #, unicode_literals
 import argparse
 import errno
 import logging
@@ -28,13 +28,6 @@ HANDBRAKE_EXE = "HandBrakeCLI"
 
 # The format string for logging messages
 LOGGING_FORMAT = "[%(levelname)s] %(message)s"
-
-# List of video formats to process. Other file formats in the 
-# input directory will be ignored.
-INPUT_VIDEO_FORMATS = ["mkv", "mp4"]
-
-# The format to convert the videos to.
-OUTPUT_VIDEO_FORMAT = "mp4"
 
 # If no output directory is explicitly specified, the output 
 # files will be placed in a directory with this value appended 
@@ -72,6 +65,15 @@ HANDBRAKE_ARGS = """
 ###############################################################
 # Default values and explanations for command-line args
 ###############################################################
+
+# List of video formats to process. Other file formats in the 
+# input directory will be ignored. On the command line, specify 
+# as "-i mkv,mp4"
+INPUT_VIDEO_FORMATS = ["mkv", "mp4"]
+
+# The format to convert the videos to. On the command line, 
+# specify as "-j mp4"
+OUTPUT_VIDEO_FORMAT = "mp4"
 
 # A list of preferred audio languages, ordered from most 
 # to least preferable. If there is only one audio track in the 
@@ -319,8 +321,8 @@ def indent_text(text, prefix):
     return "\n".join(prefix + line for line in lines)
 
 
-def get_videos_in_dir(path, recursive):
-    video_extensions = {f.lower() for f in INPUT_VIDEO_FORMATS}
+def get_videos_in_dir(path, formats, recursive):
+    video_extensions = {f.lower() for f in formats}
     for (dir_path, subdir_names, file_names) in os.walk(path):
         filtered_files = []
         for file_name in file_names:
@@ -336,16 +338,16 @@ def get_videos_in_dir(path, recursive):
             del subdir_names[:]
 
 
-def get_output_path(base_output_dir, base_input_dir, input_path):
+def get_output_path(base_output_dir, base_input_dir, input_path, output_format):
     relative_path = os.path.relpath(input_path, base_input_dir)
     temp_path = os.path.join(base_output_dir, relative_path)
-    out_path = os.path.splitext(temp_path)[0] + "." + OUTPUT_VIDEO_FORMAT
+    out_path = os.path.splitext(temp_path)[0] + "." + output_format
     return out_path
 
 
-def try_create_directory(path, permissions=0o644):
+def try_create_directory(path):
     try:
-        os.makedirs(path, permissions)
+        os.makedirs(path, 0o644)
     except OSError as e:
         if e.errno != errno.EEXIST:
             raise
@@ -637,13 +639,11 @@ def parse_duplicate_action(value):
 
 def parse_language_list(value):
     language_list = value.split(",")
-    language_list_lower = []
     for language in language_list:
         if len(language) != 3 or not language.isalpha():
             raise argparse.ArgumentTypeError("Invalid iso639-2 code: " + repr(language))
-        language_list_lower.append(language.lower())
         # TODO: Maybe add some real validation here?
-    return language_list_lower
+    return language_list
 
 
 def parse_logging_level(value):
@@ -653,10 +653,32 @@ def parse_logging_level(value):
     return level
 
 
+def parse_input_formats(value):
+    format_list = value.split(",")
+    for format in format_list:
+        if format.startswith("."):
+            raise argparse.ArgumentTypeError("Do not specify the leading '.' on input formats")
+        if not format.isalnum():
+            raise argparse.ArgumentTypeError("Invalid input format: " + repr(format))
+    return format_list
+
+
+def parse_output_format(value):
+    if value.startswith("."):
+        raise argparse.ArgumentTypeError("Do not specify the leading '.' on output format")
+    if value.lower() not in {"mp4", "mkv", "m4v"}:
+        raise argparse.ArgumentTypeError(
+            "Invalid output format (only mp4, mkv, and m4v are supported): " + repr(value)
+        )
+    return value
+
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("input_dir")
     parser.add_argument("-o", "--output-dir")
+    parser.add_argument("-i", "--input-formats", type=parse_input_formats, default=INPUT_VIDEO_FORMATS)
+    parser.add_argument("-j", "--output-format", type=parse_output_format, default=OUTPUT_VIDEO_FORMAT)
     parser.add_argument("-l", "--logging-level", type=parse_logging_level, default=LOGGING_LEVEL)
     parser.add_argument("-w", "--duplicate-action", type=parse_duplicate_action, default=DUPLICATE_ACTION)
     parser.add_argument("-d", "--output-dimensions", type=parse_output_dimensions, default=OUTPUT_DIMENSIONS)
@@ -680,7 +702,11 @@ def main():
     else:
         args.output_dir = os.path.abspath(args.output_dir)
 
-    for dir_path, file_names in get_videos_in_dir(args.input_dir, args.recursive_search):
+    if os.path.samefile(args.input_dir, args.output_dir):
+        logging.error("Input and output directories are the same")
+        return
+
+    for dir_path, file_names in get_videos_in_dir(args.input_dir, args.input_formats, args.recursive_search):
         dir_name = os.path.basename(dir_path)
         logging.info("Converting videos in '%s'", dir_name)
 
@@ -704,7 +730,7 @@ def main():
 
         for file_name in file_names:
             input_path = os.path.join(dir_path, file_name)
-            output_path = get_output_path(args.output_dir, args.input_dir, input_path)
+            output_path = get_output_path(args.output_dir, args.input_dir, input_path, args.output_format)
             relative_input_path = os.path.relpath(input_path, args.input_dir)
             relative_output_path = os.path.relpath(output_path, args.output_dir)
 
