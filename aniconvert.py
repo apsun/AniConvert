@@ -289,10 +289,8 @@ def find_handbrake_executable_path(name):
     if os.name == "nt" and not name.lower().endswith(".exe"):
         name += ".exe"
     path_env = os.environ.get("PATH", os.defpath)
-    if not path_env:
-        logging.error("PATH environment variable not set")
-        return None
     path_env_split = path_env.split(os.pathsep)
+    path_env_split.insert(0, os.path.abspath(os.path.dirname(__file__)))
     for dir_path in path_env_split:
         file_path = os.path.join(dir_path, name)
         if check_handbrake_executable(file_path):
@@ -597,6 +595,10 @@ def run_handbrake(arg_list):
             print(" " * blank_count, end="\r")
             prev_message = message
     print(" " * len(prev_message), end="\r")
+    retcode = process.poll()
+    assert retcode is not None
+    if retcode != 0:
+        raise subprocess.CalledProcessError(retcode, arg_list)
 
 
 def get_handbrake_args(handbrake_path, input_path, output_path, 
