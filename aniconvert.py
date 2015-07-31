@@ -649,7 +649,7 @@ def parse_language_list(value):
 def parse_logging_level(value):
     level = getattr(logging, value.upper(), None)
     if level is None:
-        argparse.ArgumentTypeError("Invalid logging level: " + repr(value))
+        raise argparse.ArgumentTypeError("Invalid logging level: " + repr(value))
     return level
 
 
