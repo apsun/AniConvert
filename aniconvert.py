@@ -702,7 +702,7 @@ def main():
     else:
         args.output_dir = os.path.abspath(args.output_dir)
 
-    if os.path.samefile(args.input_dir, args.output_dir):
+    if args.input_dir == args.output_dir:
         logging.error("Input and output directories are the same")
         return
 
