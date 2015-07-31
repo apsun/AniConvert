@@ -10,7 +10,7 @@
 # Distributed under the MIT license
 ###############################################################
 
-from __future__ import print_function #, unicode_literals
+from __future__ import print_function
 import argparse
 import errno
 import logging
@@ -549,27 +549,19 @@ def check_video_files(dir_path, file_names):
     return True
 
 
-def run_handbrake(arg_list):
+def process_handbrake_output(process):
     pattern1 = re.compile(r"Encoding: task \d+ of \d+, (\d+\.\d\d) %")
     pattern2 = re.compile(
         r"Encoding: task \d+ of \d+, (\d+\.\d\d) % "
         r"\((\d+\.\d\d) fps, avg (\d+\.\d\d) fps, ETA (\d\dh\d\dm\d\ds)\)"
     )
-
-    process = subprocess.Popen(
-        arg_list, 
-        stdout=subprocess.PIPE, 
-        stderr=subprocess.STDOUT, 
-        universal_newlines=True
-    )
-
     percent_complete = None
     current_fps = None
     average_fps = None
     estimated_time = None
     prev_message = ""
     format_str = "Progress: {percent}% done"
-    long_format_str = "Progress: {percent}% done (FPS: {fps}, average FPS: {avg_fps}, ETA: {eta})"
+    long_format_str = format_str + " (FPS: {fps}, average FPS: {avg_fps}, ETA: {eta})"
     while True:
         output = process.stdout.readline()
         if len(output) == 0:
@@ -595,6 +587,21 @@ def run_handbrake(arg_list):
             print(" " * blank_count, end="\r")
             prev_message = message
     print(" " * len(prev_message), end="\r")
+
+
+def run_handbrake(arg_list):
+    process = subprocess.Popen(
+        arg_list, 
+        stdout=subprocess.PIPE, 
+        stderr=subprocess.STDOUT, 
+        universal_newlines=True
+    )
+    try:
+        process_handbrake_output(process)
+    except:
+        process.kill()
+        process.wait()
+        raise
     retcode = process.poll()
     assert retcode is not None
     if retcode != 0:
