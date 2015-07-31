@@ -22,8 +22,9 @@ import subprocess
 # Configuration values, no corresponding command-line args
 ###############################################################
 
-# Path to the HandBrake CLI binary.
-HANDBRAKE_PATH = "/usr/bin/HandBrakeCLI"
+# Name of the HandBrake CLI binary. Set this to the full path 
+# of the binary if the script cannot find it automatically.
+HANDBRAKE_EXE = "HandBrakeCLI"
 
 # The format string for logging messages
 LOGGING_FORMAT = "[%(levelname)s] %(message)s"
@@ -272,6 +273,45 @@ class HandBrakeTrackInfo:
         )
 
 
+def check_handbrake_executable(file_path):
+    if not os.path.isfile(file_path):
+        return False
+    if not os.access(file_path, os.X_OK):
+        logging.warning("Found HandBrakeCLI binary at '%s', but it is not executable", file_path)
+        return False
+    logging.info("Found HandBrakeCLI binary at '%s'", file_path)
+    return True
+
+
+def find_handbrake_executable_path(name):
+    if os.name == "nt" and not name.lower().endswith(".exe"):
+        name += ".exe"
+    path_env = os.environ.get("PATH", os.defpath)
+    if not path_env:
+        logging.error("PATH environment variable not set")
+        return None
+    path_env_split = path_env.split(os.pathsep)
+    for dir_path in path_env_split:
+        file_path = os.path.join(dir_path, name)
+        if check_handbrake_executable(file_path):
+            return file_path
+    return None
+
+
+def find_handbrake_executable():
+    name = HANDBRAKE_EXE
+    if os.path.dirname(name):
+        logging.info("Full path to HandBrakeCLI binary specified, ignoring PATH")
+        if check_handbrake_executable(name):
+            return name
+    else:
+        exe_in_path = find_handbrake_executable_path(name)
+        if exe_in_path:
+            return exe_in_path
+    logging.error("Could not find executable HandBrakeCLI binary")
+    return None
+
+
 def indent_text(text, prefix):
     if isinstance(prefix, int):
         prefix = " " * prefix
@@ -319,9 +359,9 @@ def try_delete_file(path):
             raise
 
 
-def run_handbrake_scan(input_path):
+def run_handbrake_scan(handbrake_path, input_path):
     output = subprocess.check_output([
-        HANDBRAKE_PATH, 
+        handbrake_path, 
         "-i", input_path, 
         "--scan"
     ], stderr=subprocess.STDOUT)
@@ -422,8 +462,8 @@ def parse_handbrake_scan_output(output):
     return HandBrakeTrackInfo(hb_audio_tracks, hb_subtitle_tracks)
 
 
-def get_track_info(input_path):
-    scan_output = run_handbrake_scan(input_path)
+def get_track_info(handbrake_path, input_path):
+    scan_output = run_handbrake_scan(handbrake_path, input_path)
     return parse_handbrake_scan_output(scan_output)
 
 
@@ -517,7 +557,7 @@ def run_handbrake(arg_list):
     )
 
     process = subprocess.Popen(
-        [HANDBRAKE_PATH] + arg_list, 
+        arg_list, 
         stdout=subprocess.PIPE, 
         stderr=subprocess.STDOUT, 
         universal_newlines=True
@@ -557,7 +597,8 @@ def run_handbrake(arg_list):
     print(" " * len(prev_message), end="\r")
 
 
-def get_handbrake_args(input_path, output_path, audio_track, subtitle_track, video_dimensions):
+def get_handbrake_args(handbrake_path, input_path, output_path, 
+        audio_track, subtitle_track, video_dimensions):
     args = HANDBRAKE_ARGS.replace("\n", " ").strip().split()
     args += ["-i", input_path]
     args += ["-o", output_path]
@@ -568,7 +609,7 @@ def get_handbrake_args(input_path, output_path, audio_track, subtitle_track, vid
     if video_dimensions != "auto":
         args += ["-w", str(video_dimensions[0])]
         args += ["-l", str(video_dimensions[1])]
-    return args
+    return [handbrake_path] + args
 
 
 def parse_output_dimensions(value):
@@ -629,6 +670,9 @@ def parse_args():
 def main():
     args = parse_args()
     logging.basicConfig(format=LOGGING_FORMAT, level=args.logging_level)
+    handbrake_path = find_handbrake_executable()
+    if not handbrake_path:
+        return
 
     args.input_dir = os.path.abspath(args.input_dir)
     if not args.output_dir:
@@ -637,14 +681,14 @@ def main():
         args.output_dir = os.path.abspath(args.output_dir)
 
     for dir_path, file_names in get_videos_in_dir(args.input_dir, args.recursive_search):
-        relative_dir_path = os.path.relpath(dir_path, args.input_dir)
-        logging.info("Converting videos in '%s'", relative_dir_path)
+        dir_name = os.path.basename(dir_path)
+        logging.info("Converting videos in '%s'", dir_name)
 
         if args.check_all_files and not check_video_files(dir_path, file_names):
             logging.error("Track layout mismatch, skipping!")
             continue
 
-        track_info = get_track_info(os.path.join(dir_path, file_names[0]))
+        track_info = get_track_info(handbrake_path, os.path.join(dir_path, file_names[0]))
 
         audio_track = select_best_track(
             track_info.audio_tracks, 
@@ -679,6 +723,7 @@ def main():
             try_create_directory(os.path.dirname(output_path))
 
             handbrake_args = get_handbrake_args(
+                handbrake_path,
                 input_path, 
                 output_path, 
                 audio_track, 
