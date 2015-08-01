@@ -449,13 +449,15 @@ def get_track_info(handbrake_path, input_path):
 def get_track_info_for_directory(handbrake_path, dir_path, file_names):
     track_info_set = set()
     for file_name in file_names:
-        logging.info("Checking '%s'", file_name)
+        logging.info("Scanning '%s'", file_name)
         file_path = os.path.join(dir_path, file_name)
         track_info = get_track_info(handbrake_path, file_path)
         track_info_set.add(track_info)
+        return track_info_set.pop()
         if len(track_info_set) > 1:
+            logging.error("'%s' has a different track layout, skipping directory", file_name)
             return None
-    logging.info("All files passed!")
+    logging.info("All files have the same track layout")
     return track_info_set.pop()
 
 
@@ -472,26 +474,17 @@ def filter_tracks_by_language(track_list, preferred_languages):
         tracks = [t for t in track_list if t.language_code.lower() == language]
         if len(tracks) >= 1:
             return tracks
-    return track_list
+    return []
 
 
-def prompt_select_audio_track(track_list):
+def prompt_select_track(track_list, simp_dir_path, track_type):
+    print("Please manually select {0} track for '{1}':".format(track_type, simp_dir_path))
     for track in track_list:
-        print("Audio track #{0}: {1}".format(track.index, track.title or ""))
+        print("  {0} track #{1}: {2}".format(track_type.capitalize(), track.index, track.title or ""))
         print(indent_text(str(track), 4))
-    return prompt_select_track(track_list)
 
-
-def prompt_select_subtitle_track(track_list):
-    for track in track_list:
-        print("Subtitle track #{0}: {1}".format(track.index, track.title or ""))
-        print(indent_text(str(track), 4))
-    return prompt_select_track(track_list)
-
-
-def prompt_select_track(track_list):
     while True:
-        print("Choose a track #: ", end="")
+        print("Choose a {0} track #: ".format(track_type), end="")
         input_str = input()
         try:
             track_index = int(input_str)
@@ -505,7 +498,7 @@ def prompt_select_track(track_list):
 
 
 def prompt_overwrite_file(file_name):
-    print("The following file already exists: " + file_name)
+    print("The destination file already exists: '{0}'".format(file_name))
     while True:
         print("Do you want to overwrite it? (y/n): ", end="")
         input_str = input().lower()
@@ -517,14 +510,33 @@ def prompt_overwrite_file(file_name):
             print("Enter either 'y' or 'n'!")
 
 
-def select_best_track(track_list, preferred_languages, prompt_func):
+def select_best_track(track_list, preferred_languages, simp_dir_path, track_type):
+    if len(track_list) == 0:
+        logging.info("No {0} tracks found".format(track_type))
+        return None
+    elif len(track_list) == 1:
+        track = track_list[0]
+        logging.info("Only found one {0} track with language '{1}'".format(
+            track_type, track.language_code
+        ))
+        return track_list[0]
     filtered_tracks = filter_tracks_by_language(track_list, preferred_languages)
     if len(filtered_tracks) == 1:
-        return filtered_tracks[0]
-    elif len(filtered_tracks) > 1:
-        return prompt_func(filtered_tracks)
+        track = filtered_tracks[0]
+        logging.info("Automatically selected {0} track with language '{1}'".format(
+            track_type, track.language_code
+        ))
+        return track
+    if len(filtered_tracks) == 0:
+        logging.info("Failed to find any {0} tracks that match language list: {1}".format(
+            track_type, preferred_languages
+        ))
+        return prompt_select_track(track_list, simp_dir_path, track_type)
     else:
-        return None
+        logging.info("More than one {0} track matches language list: {1}".format(
+            track_type, preferred_languages
+        ))
+        return prompt_select_track(filtered_tracks, simp_dir_path, track_type)
 
 
 def process_handbrake_output(process):
@@ -540,31 +552,33 @@ def process_handbrake_output(process):
     prev_message = ""
     format_str = "Progress: {percent}% done"
     long_format_str = format_str + " (FPS: {fps}, average FPS: {avg_fps}, ETA: {eta})"
-    while True:
-        output = process.stdout.readline()
-        if len(output) == 0:
-            break
-        output = output.rstrip()
-        match = pattern1.match(output)
-        if match:
-            percent_complete = float(match.group(1))
-            match = pattern2.match(output)
+    try:
+        while True:
+            output = process.stdout.readline()
+            if len(output) == 0:
+                break
+            output = output.rstrip()
+            match = pattern1.match(output)
             if match:
-                format_str = long_format_str
-                current_fps = float(match.group(2))
-                average_fps = float(match.group(3))
-                estimated_time = match.group(4)
-            message = format_str.format(
-                percent = percent_complete, 
-                fps = current_fps, 
-                avg_fps = average_fps, 
-                eta = estimated_time
-            )
-            print(message, end="")
-            blank_count = max(len(prev_message) - len(message), 0)
-            print(" " * blank_count, end="\r")
-            prev_message = message
-    print(" " * len(prev_message), end="\r")
+                percent_complete = float(match.group(1))
+                match = pattern2.match(output)
+                if match:
+                    format_str = long_format_str
+                    current_fps = float(match.group(2))
+                    average_fps = float(match.group(3))
+                    estimated_time = match.group(4)
+                message = format_str.format(
+                    percent = percent_complete, 
+                    fps = current_fps, 
+                    avg_fps = average_fps, 
+                    eta = estimated_time
+                )
+                print(message, end="")
+                blank_count = max(len(prev_message) - len(message), 0)
+                print(" " * blank_count, end="\r")
+                prev_message = message
+    finally:
+        print()
 
 
 def run_handbrake(arg_list):
@@ -640,7 +654,7 @@ def find_handbrake_executable():
 
 def check_output_path(output_path, simp_output_path):
     if os.path.isdir(output_path):
-        logging.error("Output path '%s' is a directory, skipping", simp_output_path)
+        logging.error("Output path '%s' is a directory, skipping file", simp_output_path)
         return False
     if os.path.isfile(output_path):
         if args.duplicate_action == "prompt":
@@ -677,12 +691,14 @@ def generate_batch(args, dir_path, file_names):
     audio_track = select_best_track(
         track_info.audio_tracks, 
         args.audio_languages, 
-        prompt_select_audio_track
+        simp_dir_path, 
+        "audio"
     )
     subtitle_track = select_best_track(
         track_info.subtitle_tracks, 
         args.subtitle_languages, 
-        prompt_select_subtitle_track
+        simp_dir_path, 
+        "subtitle"
     )
     should_convert = filter_batch_files(args, dir_path, file_names)
     if len(should_convert) == 0:
@@ -712,7 +728,7 @@ def execute_batch(args, batch):
         output_file_name = replace_extension(file_name, args.output_format)
         input_path = os.path.join(batch.dir_path, file_name)
         output_path = os.path.join(output_dir, output_file_name)
-        simp_imput_path = get_simplified_path(args.input_dir, input_path)
+        simp_input_path = get_simplified_path(args.input_dir, input_path)
         handbrake_args = get_handbrake_args(
             args.handbrake_path, 
             input_path, 
@@ -721,11 +737,11 @@ def execute_batch(args, batch):
             batch.subtitle_track, 
             args.output_dimensions
         )
-        logging.info("Converting '%s'", simp_imput_path)
+        logging.info("Converting '%s'", simp_input_path)
         try:
             run_handbrake(handbrake_args)
         except subprocess.CalledProcessError as e:
-            logging.error("Error occurred while converting '%s': %s", simp_imput_path, e)
+            logging.error("Error occurred while converting '%s': %s", simp_input_path, e)
             try_delete_file(output_path)
         except:
             logging.info("Conversion aborted, cleaning up temporary files")
