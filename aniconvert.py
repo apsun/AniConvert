@@ -453,7 +453,6 @@ def get_track_info_for_directory(handbrake_path, dir_path, file_names):
         file_path = os.path.join(dir_path, file_name)
         track_info = get_track_info(handbrake_path, file_path)
         track_info_set.add(track_info)
-        return track_info_set.pop()
         if len(track_info_set) > 1:
             logging.error("'%s' has a different track layout, skipping directory", file_name)
             return None
