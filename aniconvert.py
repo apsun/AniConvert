@@ -184,11 +184,11 @@ class HandBrakeAudioInfo:
 
     def __hash__(self):
         return hash((
-            self.index,
-            self.description,
-            self.language_code,
-            self.sample_rate,
-            self.language_code,
+            self.index, 
+            self.description, 
+            self.language_code, 
+            self.sample_rate, 
+            self.language_code, 
             self.title
         ))
 
@@ -235,11 +235,11 @@ class HandBrakeSubtitleInfo:
 
     def __hash__(self):
         return hash((
-            self.index,
-            self.language,
-            self.language_code,
-            self.format,
-            self.source,
+            self.index, 
+            self.language, 
+            self.language_code, 
+            self.format, 
+            self.source, 
             self.title
         ))
 
@@ -263,7 +263,7 @@ class HandBrakeTrackInfo:
 
     def __hash__(self):
         return hash((
-            self.audio_tracks,
+            self.audio_tracks, 
             self.subtitle_tracks
         ))
 
@@ -308,6 +308,11 @@ def get_output_dir(base_output_dir, base_input_dir, dir_path):
 def replace_extension(file_name, new_extension):
     new_file_name = os.path.splitext(file_name)[0] + "." + new_extension
     return new_file_name
+
+
+def get_simplified_path(base_dir_path, full_path):
+    base_parent_dir_path = os.path.dirname(base_dir_path)
+    return os.path.relpath(full_path, base_parent_dir_path)
 
 
 def get_output_path(base_output_dir, base_input_dir, input_path, output_format):
@@ -442,15 +447,12 @@ def get_track_info(handbrake_path, input_path):
 
 
 def get_track_info_for_directory(handbrake_path, dir_path, file_names):
-    logging.info("Ensuring all videos have the same track layout")
     track_info_set = set()
     for file_name in file_names:
         logging.info("Checking '%s'", file_name)
         file_path = os.path.join(dir_path, file_name)
         track_info = get_track_info(handbrake_path, file_path)
         track_info_set.add(track_info)
-        # DEBUGGING CODE
-        return track_info_set.pop()
         if len(track_info_set) > 1:
             return None
     logging.info("All files passed!")
@@ -553,9 +555,9 @@ def process_handbrake_output(process):
                 average_fps = float(match.group(3))
                 estimated_time = match.group(4)
             message = format_str.format(
-                percent = percent_complete,
-                fps = current_fps,
-                avg_fps = average_fps,
+                percent = percent_complete, 
+                fps = current_fps, 
+                avg_fps = average_fps, 
                 eta = estimated_time
             )
             print(message, end="")
@@ -629,63 +631,63 @@ def find_handbrake_executable():
         if check_handbrake_executable(name):
             return name
     else:
-        exe_in_path = find_handbrake_executable_in_path(name)
-        if exe_in_path:
-            return exe_in_path
+        handbrake_path = find_handbrake_executable_in_path(name)
+        if handbrake_path:
+            return handbrake_path
     logging.error("Could not find executable HandBrakeCLI binary")
     return None
 
 
-def check_output_path(output_path, relative_output_path):
+def check_output_path(output_path, simp_output_path):
     if os.path.isdir(output_path):
-        logging.error("'%s' is a directory, skipping", relative_output_path)
+        logging.error("Output path '%s' is a directory, skipping", simp_output_path)
         return False
     if os.path.isfile(output_path):
         if args.duplicate_action == "prompt":
             if not prompt_overwrite_file(relative_output_path):
                 return False
         elif args.duplicate_action == "skip":
-            logging.info("Destination file '%s' already exists, skipping", relative_output_path)
+            logging.info("Destination file '%s' already exists, skipping", simp_output_path)
             return False
         elif args.duplicate_action == "overwrite":
-            logging.info("Destination file '%s' already exists, overwriting", relative_output_path)
+            logging.info("Destination file '%s' already exists, overwriting", simp_output_path)
             return True
     return True
 
 
-def generate_batch(args, dir_path, file_names):
-    dir_name = os.path.basename(dir_path)
-    logging.info("Scanning videos in '%s'", dir_name)
+def filter_batch_files(args, dir_path, file_names):
     output_dir = get_output_dir(args.output_dir, args.input_dir, dir_path)
+    should_convert = []
+    for file_name in file_names:
+        output_file_name = replace_extension(file_name, args.output_format)
+        output_path = os.path.join(output_dir, output_file_name)
+        simp_output_path = get_simplified_path(args.output_dir, output_path)
+        if not check_output_path(output_path, simp_output_path):
+            continue
+        should_convert.append(file_name)
+    return should_convert
+
+
+def generate_batch(args, dir_path, file_names):
+    simp_dir_path = get_simplified_path(args.input_dir, dir_path)
+    logging.info("Scanning videos in '%s'", simp_dir_path)
     track_info = get_track_info_for_directory(args.handbrake_path, dir_path, file_names)
     if not track_info:
         return None
-
     audio_track = select_best_track(
         track_info.audio_tracks, 
         args.audio_languages, 
         prompt_select_audio_track
     )
-
     subtitle_track = select_best_track(
         track_info.subtitle_tracks, 
         args.subtitle_languages, 
         prompt_select_subtitle_track
     )
-
-    should_convert = []
-    for file_name in file_names:
-        output_file_name = replace_extension(file_name, args.output_format)
-        input_path = os.path.join(dir_path, file_name)
-        output_path = os.path.join(output_dir, output_file_name)
-        relative_input_path = os.path.relpath(input_path, args.input_dir)
-        relative_output_path = os.path.relpath(output_path, args.output_dir)
-
-        if not check_output_path(output_path, relative_output_path):
-            continue
-        should_convert.append(file_name)
-        logging.info("Enqueued '%s'", file_name)
-
+    should_convert = filter_batch_files(args, dir_path, file_names)
+    if len(should_convert) == 0:
+        logging.warning("No videos in '%s' can be converted", simp_dir_path)
+        return None
     return BatchInfo(dir_path, should_convert, audio_track, subtitle_track)
 
 
@@ -710,6 +712,7 @@ def execute_batch(args, batch):
         output_file_name = replace_extension(file_name, args.output_format)
         input_path = os.path.join(batch.dir_path, file_name)
         output_path = os.path.join(output_dir, output_file_name)
+        simp_imput_path = get_simplified_path(args.input_dir, input_path)
         handbrake_args = get_handbrake_args(
             args.handbrake_path, 
             input_path, 
@@ -718,10 +721,11 @@ def execute_batch(args, batch):
             batch.subtitle_track, 
             args.output_dimensions
         )
+        logging.info("Converting '%s'", simp_imput_path)
         try:
             run_handbrake(handbrake_args)
         except subprocess.CalledProcessError as e:
-            logging.error("Error occurred while converting '%s': %s", relative_input_path, e)
+            logging.error("Error occurred while converting '%s': %s", simp_imput_path, e)
             try_delete_file(output_path)
         except:
             logging.info("Conversion aborted, cleaning up temporary files")
