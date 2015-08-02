@@ -614,9 +614,9 @@ def get_handbrake_args(handbrake_path, input_path, output_path,
 def check_handbrake_executable(file_path):
     if not os.path.isfile(file_path):
         return False
-    message = "Found HandBrakeCLI binary at '%s'"
+    message_format = "Found HandBrakeCLI binary at '%s'"
     if not os.access(file_path, os.X_OK):
-        message += ", but it is not executable"
+        message_format += ", but it is not executable"
         logging.warning(message, file_path)
         return False
     logging.info(message, file_path)
