@@ -479,7 +479,8 @@ def filter_tracks_by_language(track_list, preferred_languages):
 def prompt_select_track(track_list, simp_dir_path, track_type):
     print("Please manually select {0} track for '{1}':".format(track_type, simp_dir_path))
     for track in track_list:
-        print("  {0} track #{1}: {2}".format(track_type.capitalize(), track.index, track.title or ""))
+        message_format = "  {0} track #{1}: {2}"
+        print(message_format.format(track_type.capitalize(), track.index, track.title or ""))
         print(indent_text(str(track), 4))
 
     while True:
@@ -515,26 +516,22 @@ def select_best_track(track_list, preferred_languages, simp_dir_path, track_type
         return None
     elif len(track_list) == 1:
         track = track_list[0]
-        logging.info("Only found one {0} track with language '{1}'".format(
-            track_type, track.language_code
-        ))
+        message_format = "Only found one {0} track with language '{1}'"
+        logging.info(message_format.format(track_type, track.language_code))
         return track_list[0]
     filtered_tracks = filter_tracks_by_language(track_list, preferred_languages)
     if len(filtered_tracks) == 1:
         track = filtered_tracks[0]
-        logging.info("Automatically selected {0} track with language '{1}'".format(
-            track_type, track.language_code
-        ))
+        message_format = "Automatically selected {0} track with language '{1}'"
+        logging.info(message_format.format(track_type, track.language_code))
         return track
     if len(filtered_tracks) == 0:
-        logging.info("Failed to find any {0} tracks that match language list: {1}".format(
-            track_type, preferred_languages
-        ))
+        message_format = "Failed to find any {0} tracks that match language list: {1}"
+        logging.info(message_format.format(track_type, preferred_languages))
         return prompt_select_track(track_list, simp_dir_path, track_type)
     else:
-        logging.info("More than one {0} track matches language list: {1}".format(
-            track_type, preferred_languages
-        ))
+        message_format = "More than one {0} track matches language list: {1}"
+        logging.info(message_format.format(track_type, preferred_languages))
         return prompt_select_track(filtered_tracks, simp_dir_path, track_type)
 
 
@@ -617,10 +614,12 @@ def get_handbrake_args(handbrake_path, input_path, output_path,
 def check_handbrake_executable(file_path):
     if not os.path.isfile(file_path):
         return False
+    message = "Found HandBrakeCLI binary at '%s'"
     if not os.access(file_path, os.X_OK):
-        logging.warning("Found HandBrakeCLI binary at '%s', but it is not executable", file_path)
+        message += ", but it is not executable"
+        logging.warning(message, file_path)
         return False
-    logging.info("Found HandBrakeCLI binary at '%s'", file_path)
+    logging.info(message, file_path)
     return True
 
 
@@ -652,20 +651,20 @@ def find_handbrake_executable():
 
 
 def check_output_path(output_path, simp_output_path):
+    if not os.path.exists(output_path):
+        return True
     if os.path.isdir(output_path):
         logging.error("Output path '%s' is a directory, skipping file", simp_output_path)
         return False
-    if os.path.isfile(output_path):
-        if args.duplicate_action == "prompt":
-            if not prompt_overwrite_file(relative_output_path):
-                return False
-        elif args.duplicate_action == "skip":
-            logging.info("Destination file '%s' already exists, skipping", simp_output_path)
+    if args.duplicate_action == "prompt":
+        if not prompt_overwrite_file(relative_output_path):
             return False
-        elif args.duplicate_action == "overwrite":
-            logging.info("Destination file '%s' already exists, overwriting", simp_output_path)
-            return True
-    return True
+    elif args.duplicate_action == "skip":
+        logging.info("Destination file '%s' already exists, skipping", simp_output_path)
+        return False
+    elif args.duplicate_action == "overwrite":
+        logging.info("Destination file '%s' already exists, overwriting", simp_output_path)
+        return True
 
 
 def filter_batch_files(args, dir_path, file_names):
@@ -716,7 +715,10 @@ def generate_batches(args):
         if batch:
             batch_list.append(batch)
     if not found:
-        logging.info("No videos found in input directory, are you missing an '-r' option?")
+        message = "No videos found in input directory"
+        if not args.recursive_search:
+            message += ", for recursive search specify '-r'"
+        logging.error(message)
     return batch_list
 
 
@@ -771,7 +773,7 @@ def sanitize_and_validate_args(args):
             logging.error("HandBrake CLI binary not found: '%s'", args.handbrake_path)
             return False
         if not os.access(args.handbrake_path, os.X_OK):
-            logging.error("Insufficient permissions to execute HandBrake: '%s'", args.handbrake_path)
+            logging.error("HandBrake CLI binary is not executable: '%s'", args.handbrake_path)
             return False
     else:
         args.handbrake_path = find_handbrake_executable()
@@ -833,9 +835,8 @@ def parse_output_format(value):
     if value.startswith("."):
         raise argparse.ArgumentTypeError("Do not specify the leading '.' on output format")
     if value.lower() not in {"mp4", "mkv", "m4v"}:
-        raise argparse.ArgumentTypeError(
-            "Invalid output format (only mp4, mkv, and m4v are supported): " + repr(value)
-        )
+        message = "Invalid output format (only mp4, mkv, and m4v are supported): " + repr(value)
+        raise argparse.ArgumentTypeError(message)
     return value
 
 
@@ -844,14 +845,22 @@ def parse_args():
     parser.add_argument("input_dir")
     parser.add_argument("-o", "--output-dir")
     parser.add_argument("-x", "--handbrake-path")
-    parser.add_argument("-r", "--recursive-search", action="store_true", default=RECURSIVE_SEARCH)
-    parser.add_argument("-i", "--input-formats", type=parse_input_formats, default=INPUT_VIDEO_FORMATS)
-    parser.add_argument("-j", "--output-format", type=parse_output_format, default=OUTPUT_VIDEO_FORMAT)
-    parser.add_argument("-l", "--logging-level", type=parse_logging_level, default=LOGGING_LEVEL)
-    parser.add_argument("-w", "--duplicate-action", type=parse_duplicate_action, default=DUPLICATE_ACTION)
-    parser.add_argument("-d", "--output-dimensions", type=parse_output_dimensions, default=OUTPUT_DIMENSIONS)
-    parser.add_argument("-a", "--audio-languages", type=parse_language_list, default=AUDIO_LANGUAGES)
-    parser.add_argument("-s", "--subtitle-languages", type=parse_language_list, default=SUBTITLE_LANGUAGES)
+    parser.add_argument("-r", "--recursive-search", 
+        action="store_true", default=RECURSIVE_SEARCH)
+    parser.add_argument("-i", "--input-formats", 
+        type=parse_input_formats, default=INPUT_VIDEO_FORMATS)
+    parser.add_argument("-j", "--output-format", 
+        type=parse_output_format, default=OUTPUT_VIDEO_FORMAT)
+    parser.add_argument("-l", "--logging-level", 
+        type=parse_logging_level, default=LOGGING_LEVEL)
+    parser.add_argument("-w", "--duplicate-action", 
+        type=parse_duplicate_action, default=DUPLICATE_ACTION)
+    parser.add_argument("-d", "--output-dimensions", 
+        type=parse_output_dimensions, default=OUTPUT_DIMENSIONS)
+    parser.add_argument("-a", "--audio-languages", 
+        type=parse_language_list, default=AUDIO_LANGUAGES)
+    parser.add_argument("-s", "--subtitle-languages", 
+        type=parse_language_list, default=SUBTITLE_LANGUAGES)
     return parser.parse_args()
 
 
