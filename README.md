@@ -12,7 +12,7 @@ Yet another batch file converter for [HandBrake](https://handbrake.fr/)
 
 ## Requirements
 
-- [HandBrake (command-line)](https://handbrake.fr/downloads2.php)
+- [HandBrake (command-line version)](https://handbrake.fr/downloads2.php)
 - [Python](https://www.python.org/downloads/) 2.7 or above (Python 3 is supported)
 - A folder full of videos to convert!
 
@@ -53,6 +53,8 @@ only way to maintain their styling is to burn them into the video.
 
 ### I get this error: `AssertionError: Track count mismatch`
 
-Try downgrading FFmpeg (I have `2.5.7` installed). HandBrake fails to read the 
-subtitle values on newer versions of FFmpeg, causing it to miss some tracks. 
-If this does not resolve the issue, please submit a bug report.
+This commonly occurs if your copy of HandBrakeCLI is dynamically linked 
+to FFmpeg instead of Libav, and your video contains ASS format subtitles. 
+If possible, use a pre-built copy of HandBrakeCLI downloaded from the 
+[official site](https://handbrake.fr/downloads2.php). For other operating 
+systems, you will have to compile HandBrakeCLI yourself.
