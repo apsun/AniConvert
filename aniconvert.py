@@ -374,7 +374,7 @@ def parse_ffmpeg_stream_info(output_lines, start_index):
             i += 1
             continue
         stream_index = match.group(1)
-        language_code = match.group(3)
+        language_code = match.group(3) or "und"
         codec_type = match.group(4)
         codec_name = match.group(5)
         i += 1
