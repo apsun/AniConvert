@@ -50,3 +50,9 @@ same track layout.
 Again, this script was written with anime in mind, where subtitles tend to 
 be highly stylized. HandBrake does not handle these subtitles well, and the 
 only way to maintain their styling is to burn them into the video.
+
+### I get this error: `AssertionError: Track count mismatch`
+
+Try downgrading FFmpeg (I have `2.5.7` installed). HandBrake fails to read the 
+subtitle values on newer versions of FFmpeg, causing it to miss some tracks. 
+If this does not resolve the issue, please submit a bug report.

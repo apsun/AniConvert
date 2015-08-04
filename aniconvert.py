@@ -408,9 +408,9 @@ def parse_ffmpeg_stream_info(output_lines, start_index):
 def merge_track_titles(hb_tracks, ff_streams):
     if not ff_streams:
         return
-    assert len(hb_tracks) == len(ff_streams)
+    assert len(hb_tracks) == len(ff_streams), "Track count mismatch"
     for hb_track, ff_stream in zip(hb_tracks, ff_streams):
-        assert hb_track.language_code == ff_stream.language_code
+        assert hb_track.language_code == ff_stream.language_code, "Track language code mismatch"
         hb_track.title = ff_stream.metadata.get("title")
 
 
@@ -421,21 +421,23 @@ def parse_handbrake_scan_output(output):
     ff_audio_streams = None
     ff_subtitle_streams = None
     incremented = False
-    for l in lines:
-        logging.debug(l)
     i = 0
     while i < len(lines):
         if lines[i].startswith("Input #0, "):
             logging.debug("Found FFmpeg stream info")
             i, ff_audio_streams, ff_subtitle_streams = parse_ffmpeg_stream_info(lines, i)
+            message_format = "FFmpeg: {0} audio track(s), {1} subtitle track(s)"
+            logging.debug(message_format.format(len(ff_audio_streams), len(ff_subtitle_streams)))
             incremented = True
         if lines[i] == "  + audio tracks:":
             logging.debug("Found HandBrake audio track info")
             i, hb_audio_tracks = parse_handbrake_track_info(lines, i, HandBrakeAudioInfo)
+            logging.debug("HandBrake: {0} audio track(s)".format(len(hb_audio_tracks)))
             incremented = True
         if lines[i] == "  + subtitle tracks:":
             logging.debug("Found HandBrake subtitle track info")
             i, hb_subtitle_tracks = parse_handbrake_track_info(lines, i, HandBrakeSubtitleInfo)
+            logging.debug("HandBrake: {0} subtitle track(s)".format(len(hb_subtitle_tracks)))
             incremented = True
         if not incremented:
             i += 1
@@ -446,11 +448,7 @@ def parse_handbrake_scan_output(output):
 
 
 def get_track_info(handbrake_path, input_path):
-    try:
-        scan_output = run_handbrake_scan(handbrake_path, input_path)
-    except subprocess.CalledProcessError as e:
-        logging.error("Scanning failed: " + e.output)
-        raise
+    scan_output = run_handbrake_scan(handbrake_path, input_path)
     return parse_handbrake_scan_output(scan_output)
 
 
