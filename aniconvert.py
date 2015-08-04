@@ -302,6 +302,8 @@ def get_files_in_dir(path, extensions, recursive):
 
 def get_output_dir(base_output_dir, base_input_dir, dir_path):
     relative_path = os.path.relpath(dir_path, base_input_dir)
+    if relative_path == ".":
+        return base_output_dir
     return os.path.join(base_output_dir, relative_path)
 
 
@@ -324,7 +326,7 @@ def get_output_path(base_output_dir, base_input_dir, input_path, output_format):
 
 def try_create_directory(path):
     try:
-        os.makedirs(path, 0o644)
+        os.makedirs(path, 0o755)
     except OSError as e:
         if e.errno != errno.EEXIST:
             raise
@@ -419,6 +421,8 @@ def parse_handbrake_scan_output(output):
     ff_audio_streams = None
     ff_subtitle_streams = None
     incremented = False
+    for l in lines:
+        logging.debug(l)
     i = 0
     while i < len(lines):
         if lines[i].startswith("Input #0, "):
@@ -442,7 +446,11 @@ def parse_handbrake_scan_output(output):
 
 
 def get_track_info(handbrake_path, input_path):
-    scan_output = run_handbrake_scan(handbrake_path, input_path)
+    try:
+        scan_output = run_handbrake_scan(handbrake_path, input_path)
+    except subprocess.CalledProcessError as e:
+        logging.error("Scanning failed: " + e.output)
+        raise
     return parse_handbrake_scan_output(scan_output)
 
 
@@ -617,9 +625,9 @@ def check_handbrake_executable(file_path):
     message_format = "Found HandBrakeCLI binary at '%s'"
     if not os.access(file_path, os.X_OK):
         message_format += ", but it is not executable"
-        logging.warning(message, file_path)
+        logging.warning(message_format, file_path)
         return False
-    logging.info(message, file_path)
+    logging.info(message_format, file_path)
     return True
 
 
