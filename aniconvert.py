@@ -175,13 +175,6 @@ class HandBrakeAudioInfo:
             format_str += "\nBit rate: {bit_rate}bps"
         return format_str.format(**self.__dict__)
 
-    def __repr__(self):
-        format_str = "{index}, {description} (iso639-2: {language_code})"
-        if self.sample_rate and self.bit_rate:
-            format_str += ", {sample_rate}Hz, {bit_rate}bps"
-        info_str = format_str.format(**self.__dict__)
-        return "HandBrakeAudioInfo(" + repr(info_str) + ")"
-
     def __hash__(self):
         return hash((
             self.index, 
@@ -227,11 +220,6 @@ class HandBrakeSubtitleInfo:
             "Source: {source}"
         )
         return format_str.format(**self.__dict__)
-
-    def __repr__(self):
-        format_str = "{index}, {language} (iso639-2: {language_code}) ({format})({source})"
-        info_str = format_str.format(**self.__dict__)
-        return "HandBrakeSubtitleInfo(" + repr(info_str) + ")"
 
     def __hash__(self):
         return hash((
@@ -561,24 +549,25 @@ def process_handbrake_output(process):
                 break
             output = output.rstrip()
             match = pattern1.match(output)
+            if not match:
+                continue
+            percent_complete = float(match.group(1))
+            match = pattern2.match(output)
             if match:
-                percent_complete = float(match.group(1))
-                match = pattern2.match(output)
-                if match:
-                    format_str = long_format_str
-                    current_fps = float(match.group(2))
-                    average_fps = float(match.group(3))
-                    estimated_time = match.group(4)
-                message = format_str.format(
-                    percent = percent_complete, 
-                    fps = current_fps, 
-                    avg_fps = average_fps, 
-                    eta = estimated_time
-                )
-                print(message, end="")
-                blank_count = max(len(prev_message) - len(message), 0)
-                print(" " * blank_count, end="\r")
-                prev_message = message
+                format_str = long_format_str
+                current_fps = float(match.group(2))
+                average_fps = float(match.group(3))
+                estimated_time = match.group(4)
+            message = format_str.format(
+                percent = percent_complete, 
+                fps = current_fps, 
+                avg_fps = average_fps, 
+                eta = estimated_time
+            )
+            print(message, end="")
+            blank_count = max(len(prev_message) - len(message), 0)
+            print(" " * blank_count, end="\r")
+            prev_message = message
     finally:
         print()
 
