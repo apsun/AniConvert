@@ -87,11 +87,11 @@ OUTPUT_VIDEO_FORMAT = "mp4"
 # Also accepted is the value "none", which will cause no track 
 # to be selected.
 # On the command line, specify as "-a jpn,eng"
-AUDIO_LANGUAGES = ["jpn", "und", "eng"]
+AUDIO_LANGUAGES = ["jpn", "eng"]
 
 # This is the same as the preferred audio languages, but 
 # for subtitles. On the command line, specify as "-s eng"
-SUBTITLE_LANGUAGES = ["eng", "und"]
+SUBTITLE_LANGUAGES = ["eng"]
 
 # What to do when the destination file already exists. Can be 
 # one of:
@@ -108,13 +108,6 @@ DUPLICATE_ACTION = "skip"
 # the input video dimensions. On the command line, specify 
 # as "-d 1280x720", "-d 720p", or "-d auto"
 OUTPUT_DIMENSIONS = "auto"
-
-# What to do if only one track with no language code is 
-# encountered. If set to "auto", it will automatically be 
-# selected, with no user interaction required. If set to 
-# "prompt", the user will be asked whether they want to use 
-# the track, or to use no tracks.
-UND_LANGUAGE_HIGHEST_PRIORITY = "auto"
 
 # Set this to true to search sub-directories within the input 
 # directory. Files will be output in the correspondingly named 
@@ -408,18 +401,18 @@ def parse_handbrake_scan_output(output):
         if lines[i].startswith("Input #0, "):
             logging.debug("Found FFmpeg stream info")
             i, ff_audio_streams, ff_subtitle_streams = parse_ffmpeg_stream_info(lines, i)
-            message_format = "FFmpeg: {0} audio track(s), {1} subtitle track(s)"
-            logging.debug(message_format.format(len(ff_audio_streams), len(ff_subtitle_streams)))
+            message_format = "FFmpeg: %d audio track(s), %d subtitle track(s)"
+            logging.debug(message_format, len(ff_audio_streams), len(ff_subtitle_streams))
             incremented = True
         if lines[i] == "  + audio tracks:":
             logging.debug("Found HandBrake audio track info")
             i, hb_audio_tracks = parse_handbrake_track_info(lines, i, HandBrakeAudioInfo)
-            logging.debug("HandBrake: {0} audio track(s)".format(len(hb_audio_tracks)))
+            logging.debug("HandBrake: %d audio track(s)", len(hb_audio_tracks))
             incremented = True
         if lines[i] == "  + subtitle tracks:":
             logging.debug("Found HandBrake subtitle track info")
             i, hb_subtitle_tracks = parse_handbrake_track_info(lines, i, HandBrakeSubtitleInfo)
-            logging.debug("HandBrake: {0} subtitle track(s)".format(len(hb_subtitle_tracks)))
+            logging.debug("HandBrake: %d subtitle track(s)", len(hb_subtitle_tracks))
             incremented = True
         if not incremented:
             i += 1
@@ -433,6 +426,7 @@ def get_track_info(handbrake_path, input_path):
     scan_output = run_handbrake_scan(handbrake_path, input_path)
     return parse_handbrake_scan_output(scan_output)
 
+
 def get_track_by_index(track_list, track_index):
     for track in track_list:
         if track.index == track_index:
@@ -441,24 +435,50 @@ def get_track_by_index(track_list, track_index):
 
 
 def filter_tracks_by_language(track_list, preferred_languages):
-    for language in preferred_languages:
-        language = language.lower()
-        tracks = [t for t in track_list if t.language_code.lower() == language]
-        if len(tracks) >= 1:
-            return tracks
+    for preferred_language_code in preferred_languages:
+        preferred_language_code = preferred_language_code.lower()
+        if preferred_language_code == "none":
+            return None
+        und_count = 0
+        filtered_tracks = []
+        for track in track_list:
+            if track.language_code == "und":
+                und_count += 1
+                filtered_tracks.append(track)
+            elif track.language_code == preferred_language_code:
+                filtered_tracks.append(track)
+        if len(filtered_tracks) - und_count >= 1:
+            return filtered_tracks
+        elif len(track_list) == und_count:
+            logging.info("All tracks have undefined language code")
+            return filtered_tracks
     return []
 
 
-def prompt_select_track(track_list, file_name, track_type):
-    print("Please select {0} track for '{1}':".format(track_type, file_name))
+def print_track_list(track_list, file_name, track_type):
+    print("+ Video: '{1}'".format(track_type, file_name))
     for track in track_list:
-        message_format = "  {0} track #{1}: {2}"
+        message_format = "   + [{1}] {0} track: {2}"
         print(message_format.format(track_type.capitalize(), track.index, track.title or ""))
-        print(indent_text(str(track), 4))
+        print(indent_text(str(track), "      + "))
 
+
+def prompt_select_track(track_list, filtered_track_list, file_name, track_type):
+    print("Please select {0} track:".format(track_type, file_name))
+    print_track_list(filtered_track_list, file_name, track_type)
+    prompt_format = "Choose a {0} track # (type 'all' to view all choices): "
+    alt_prompt_format = "Choose a {0} track # (type 'none' for no track): "
+    if len(track_list) == len(filtered_track_list):
+        prompt_format = alt_prompt_format
     while True:
-        print("Choose a {0} track #: ".format(track_type), end="")
-        input_str = input()
+        print(prompt_format.format(track_type), end="")
+        input_str = input().lower()
+        if input_str == "all":
+            print_track_list(track_list, file_name, track_type)
+            prompt_format = alt_prompt_format
+            continue
+        if input_str == "none":
+            return None
         try:
             track_index = int(input_str)
         except ValueError:
@@ -485,34 +505,33 @@ def prompt_overwrite_file(file_name):
 
 def select_best_track(track_list, preferred_languages, file_name, track_type):
     if len(track_list) == 0:
-        logging.info("No {0} tracks found".format(track_type))
+        logging.info("No %s tracks found", track_type)
         return None
-    elif len(track_list) == 1:
-        track = track_list[0]
-        message_format = "Only found one {0} track with language '{1}'"
-        logging.info(message_format.format(track_type, track.language_code))
-        return track_list[0]
     filtered_tracks = filter_tracks_by_language(track_list, preferred_languages)
+    if filtered_tracks is None:
+        logging.info("Matched 'none' language, discarding %s track", track_type)
+        return None
     if len(filtered_tracks) == 1:
         track = filtered_tracks[0]
-        message_format = "Automatically selected {0} track with language '{1}'"
-        logging.info(message_format.format(track_type, track.language_code))
+        message_format = "Automatically selected %s track with language '%s'"
+        logging.info(message_format, track_type, track.language_code)
         return track
     if len(filtered_tracks) == 0:
-        message_format = "Failed to find any {0} tracks that match language list: {1}"
-        logging.info(message_format.format(track_type, preferred_languages))
-        return prompt_select_track(track_list, file_name, track_type)
+        message_format = "Failed to find any %s tracks that match language list: %s"
+        logging.info(message_format, track_type, preferred_languages)
+        return prompt_select_track(track_list, track_list, file_name, track_type)
     else:
-        message_format = "More than one {0} track matches language list: {1}"
-        logging.info(message_format.format(track_type, preferred_languages))
-        return prompt_select_track(filtered_tracks, file_name, track_type)
+        message_format = "More than one %s track matches language list: %s"
+        logging.info(message_format, track_type, preferred_languages)
+        return prompt_select_track(track_list, filtered_tracks, file_name, track_type)
 
 
-def select_best_track_auto(selected_track_map, track_list, 
+def select_best_track_cached(selected_track_map, track_list, 
         preferred_languages, file_name, track_type):
     track_set = tuple(track_list)
-    selected_track = selected_track_map.get(track_set)
-    if not selected_track:
+    try:
+        selected_track = selected_track_map[track_set]
+    except KeyError:
         selected_track = select_best_track(track_list, preferred_languages, file_name, track_type)
         selected_track_map[track_set] = selected_track
     else:
@@ -675,22 +694,28 @@ def get_track_map(args, dir_path, file_names):
     for file_name in file_names:
         logging.info("Scanning '%s'", file_name)
         file_path = os.path.join(dir_path, file_name)
-        audio_tracks, subtitle_tracks = get_track_info(args.handbrake_path, file_path)
-        selected_audio_track = select_best_track_auto(
+        audio_tracks, subtitle_tracks = get_track_info(
+            args.handbrake_path, 
+            file_path
+        )
+        selected_audio_track = select_best_track_cached(
             selected_audio_track_map, 
             audio_tracks, 
             args.audio_languages, 
             file_name, 
             "audio"
         )
-        selected_subtitle_track = select_best_track_auto(
+        selected_subtitle_track = select_best_track_cached(
             selected_subtitle_track_map, 
             subtitle_tracks, 
             args.subtitle_languages, 
             file_name, 
             "subtitle"
         )
-        track_map[file_name] = TrackInfo(selected_audio_track, selected_subtitle_track)
+        track_map[file_name] = TrackInfo(
+            selected_audio_track, 
+            selected_subtitle_track
+        )
     return track_map
 
 
@@ -808,7 +833,7 @@ def parse_duplicate_action(value):
 def parse_language_list(value):
     language_list = value.split(",")
     for language in language_list:
-        if len(language) != 3 or not language.isalpha():
+        if not language.isalpha() or (len(language) != 3 and language.lower() != "none"):
             raise argparse.ArgumentTypeError("Invalid iso639-2 code: " + repr(language))
         # TODO: Maybe add some real validation here?
     return language_list
