@@ -40,18 +40,19 @@ priority for your audio and subtitle tracks.
 
 ### How do I pronounce the name?
 
-"AnyConvert". The "Ani" is also short for "anime", which is what the script 
-was designed for. Of course, it also works great with just about any TV series, 
-from Game of Thrones to My Little Pony, as long as all your video files have the 
-same track layout.
+"AnyConvert". The "Ani" is also short for "anime", which is what this script 
+was designed for. Of course, it also works great with just about any show 
+series, from Game of Thrones to My Little Pony.
 
 ### Why are my subtitles burned into the video?
 
 Again, this script was written with anime in mind, where subtitles tend to 
 be highly stylized. HandBrake does not handle these subtitles well, and the 
-only way to maintain their styling is to burn them into the video.
+only way to maintain their styling is to burn them into the video. Read 
+[the HandBrake wiki](https://trac.handbrake.fr/wiki/Subtitles#wikipage) 
+for more details.
 
-### I get this error: `AssertionError: Track count mismatch`
+### Why do I get the error `AssertionError: Track count mismatch`?
 
 This commonly occurs if your copy of HandBrakeCLI is dynamically linked 
 to FFmpeg instead of Libav, and your video contains ASS format subtitles. 
