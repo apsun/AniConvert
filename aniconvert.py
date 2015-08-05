@@ -550,8 +550,8 @@ def process_handbrake_output(process):
     average_fps = None
     estimated_time = None
     prev_message = ""
-    format_str = "Progress: {percent}% done"
-    long_format_str = format_str + " (FPS: {fps}, average FPS: {avg_fps}, ETA: {eta})"
+    format_str = "Progress: {percent:.2f}% done"
+    long_format_str = format_str + " (FPS: {fps:.2f}, average FPS: {avg_fps:.2f}, ETA: {eta})"
     try:
         while True:
             output = process.stdout.readline()
