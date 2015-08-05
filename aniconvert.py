@@ -12,6 +12,7 @@
 
 from __future__ import print_function
 import argparse
+import collections
 import errno
 import logging
 import os
@@ -82,13 +83,15 @@ OUTPUT_VIDEO_FORMAT = "mp4"
 # you will be prompted to select one. If no tracks are 
 # in the most preferable language, the program will check 
 # the second most preferable language, and so on. This value 
-# should use the iso639-2 (3 letter) language code format.
+# should use the iso639-2 (3 letter) language code format. 
+# Also accepted is the value "none", which will cause no track 
+# to be selected.
 # On the command line, specify as "-a jpn,eng"
-AUDIO_LANGUAGES = ["jpn", "eng"]
+AUDIO_LANGUAGES = ["jpn", "und", "eng"]
 
 # This is the same as the preferred audio languages, but 
 # for subtitles. On the command line, specify as "-s eng"
-SUBTITLE_LANGUAGES = ["eng"]
+SUBTITLE_LANGUAGES = ["eng", "und"]
 
 # What to do when the destination file already exists. Can be 
 # one of:
@@ -105,6 +108,13 @@ DUPLICATE_ACTION = "skip"
 # the input video dimensions. On the command line, specify 
 # as "-d 1280x720", "-d 720p", or "-d auto"
 OUTPUT_DIMENSIONS = "auto"
+
+# What to do if only one track with no language code is 
+# encountered. If set to "auto", it will automatically be 
+# selected, with no user interaction required. If set to 
+# "prompt", the user will be asked whether they want to use 
+# the track, or to use no tracks.
+UND_LANGUAGE_HIGHEST_PRIORITY = "auto"
 
 # Set this to true to search sub-directories within the input 
 # directory. Files will be output in the correspondingly named 
@@ -127,12 +137,16 @@ except NameError:
     pass
 
 
-class BatchInfo:
-    def __init__(self, dir_path, file_names, audio_track, subtitle_track):
-        self.dir_path = dir_path
-        self.file_names = file_names
+class TrackInfo:
+    def __init__(self, audio_track, subtitle_track):
         self.audio_track = audio_track
         self.subtitle_track = subtitle_track
+
+
+class BatchInfo:
+    def __init__(self, dir_path, track_map):
+        self.dir_path = dir_path
+        self.track_map = track_map
 
 
 class FFmpegStreamInfo:
@@ -241,26 +255,6 @@ class HandBrakeSubtitleInfo:
             self.format == other.format and 
             self.source == other.source and 
             self.title == other.title
-        )
-
-
-class HandBrakeTrackInfo:
-    def __init__(self, audio_tracks, subtitle_tracks):
-        self.audio_tracks = tuple(audio_tracks)
-        self.subtitle_tracks = tuple(subtitle_tracks)
-
-    def __hash__(self):
-        return hash((
-            self.audio_tracks, 
-            self.subtitle_tracks
-        ))
-
-    def __eq__(self, other):
-        if not isinstance(other, HandBrakeTrackInfo):
-            return False
-        return (
-            self.audio_tracks == other.audio_tracks and 
-            self.subtitle_tracks == other.subtitle_tracks
         )
 
 
@@ -432,27 +426,12 @@ def parse_handbrake_scan_output(output):
         incremented = False
     merge_track_titles(hb_audio_tracks, ff_audio_streams)
     merge_track_titles(hb_subtitle_tracks, ff_subtitle_streams)
-    return HandBrakeTrackInfo(hb_audio_tracks, hb_subtitle_tracks)
+    return (hb_audio_tracks, hb_subtitle_tracks)
 
 
 def get_track_info(handbrake_path, input_path):
     scan_output = run_handbrake_scan(handbrake_path, input_path)
     return parse_handbrake_scan_output(scan_output)
-
-
-def get_track_info_for_directory(handbrake_path, dir_path, file_names):
-    track_info_set = set()
-    for file_name in file_names:
-        logging.info("Scanning '%s'", file_name)
-        file_path = os.path.join(dir_path, file_name)
-        track_info = get_track_info(handbrake_path, file_path)
-        track_info_set.add(track_info)
-        if len(track_info_set) > 1:
-            logging.error("'%s' has a different track layout, skipping directory", file_name)
-            return None
-    logging.info("All files have the same track layout")
-    return track_info_set.pop()
-
 
 def get_track_by_index(track_list, track_index):
     for track in track_list:
@@ -470,8 +449,8 @@ def filter_tracks_by_language(track_list, preferred_languages):
     return []
 
 
-def prompt_select_track(track_list, simp_dir_path, track_type):
-    print("Please manually select {0} track for '{1}':".format(track_type, simp_dir_path))
+def prompt_select_track(track_list, file_name, track_type):
+    print("Please select {0} track for '{1}':".format(track_type, file_name))
     for track in track_list:
         message_format = "  {0} track #{1}: {2}"
         print(message_format.format(track_type.capitalize(), track.index, track.title or ""))
@@ -504,7 +483,7 @@ def prompt_overwrite_file(file_name):
             print("Enter either 'y' or 'n'!")
 
 
-def select_best_track(track_list, preferred_languages, simp_dir_path, track_type):
+def select_best_track(track_list, preferred_languages, file_name, track_type):
     if len(track_list) == 0:
         logging.info("No {0} tracks found".format(track_type))
         return None
@@ -522,11 +501,23 @@ def select_best_track(track_list, preferred_languages, simp_dir_path, track_type
     if len(filtered_tracks) == 0:
         message_format = "Failed to find any {0} tracks that match language list: {1}"
         logging.info(message_format.format(track_type, preferred_languages))
-        return prompt_select_track(track_list, simp_dir_path, track_type)
+        return prompt_select_track(track_list, file_name, track_type)
     else:
         message_format = "More than one {0} track matches language list: {1}"
         logging.info(message_format.format(track_type, preferred_languages))
-        return prompt_select_track(filtered_tracks, simp_dir_path, track_type)
+        return prompt_select_track(filtered_tracks, file_name, track_type)
+
+
+def select_best_track_auto(selected_track_map, track_list, 
+        preferred_languages, file_name, track_type):
+    track_set = tuple(track_list)
+    selected_track = selected_track_map.get(track_set)
+    if not selected_track:
+        selected_track = select_best_track(track_list, preferred_languages, file_name, track_type)
+        selected_track_map[track_set] = selected_track
+    else:
+        logging.debug("%s track layout already encountered", track_type.capitalize())
+    return selected_track
 
 
 def process_handbrake_output(process):
@@ -598,6 +589,8 @@ def get_handbrake_args(handbrake_path, input_path, output_path,
     args += ["-o", output_path]
     if audio_track:
         args += ["-a", str(audio_track.index)]
+    else:
+        args += ["-a", "none"]
     if subtitle_track:
         args += ["-s", str(subtitle_track.index)]
     if video_dimensions != "auto":
@@ -645,7 +638,8 @@ def find_handbrake_executable():
     return None
 
 
-def check_output_path(output_path, simp_output_path):
+def check_output_path(args, output_path):
+    simp_output_path = get_simplified_path(args.output_dir, output_path)
     if not os.path.exists(output_path):
         return True
     if os.path.isdir(output_path):
@@ -662,42 +656,53 @@ def check_output_path(output_path, simp_output_path):
         return True
 
 
-def filter_batch_files(args, dir_path, file_names):
+def filter_convertible_files(args, dir_path, file_names):
     output_dir = get_output_dir(args.output_dir, args.input_dir, dir_path)
-    should_convert = []
+    convertible_files = []
     for file_name in file_names:
         output_file_name = replace_extension(file_name, args.output_format)
         output_path = os.path.join(output_dir, output_file_name)
-        simp_output_path = get_simplified_path(args.output_dir, output_path)
-        if not check_output_path(output_path, simp_output_path):
+        if not check_output_path(args, output_path):
             continue
-        should_convert.append(file_name)
-    return should_convert
+        convertible_files.append(file_name)
+    return convertible_files
+
+
+def get_track_map(args, dir_path, file_names):
+    selected_audio_track_map = {}
+    selected_subtitle_track_map = {}
+    track_map = collections.OrderedDict()
+    for file_name in file_names:
+        logging.info("Scanning '%s'", file_name)
+        file_path = os.path.join(dir_path, file_name)
+        audio_tracks, subtitle_tracks = get_track_info(args.handbrake_path, file_path)
+        selected_audio_track = select_best_track_auto(
+            selected_audio_track_map, 
+            audio_tracks, 
+            args.audio_languages, 
+            file_name, 
+            "audio"
+        )
+        selected_subtitle_track = select_best_track_auto(
+            selected_subtitle_track_map, 
+            subtitle_tracks, 
+            args.subtitle_languages, 
+            file_name, 
+            "subtitle"
+        )
+        track_map[file_name] = TrackInfo(selected_audio_track, selected_subtitle_track)
+    return track_map
 
 
 def generate_batch(args, dir_path, file_names):
     simp_dir_path = get_simplified_path(args.input_dir, dir_path)
     logging.info("Scanning videos in '%s'", simp_dir_path)
-    track_info = get_track_info_for_directory(args.handbrake_path, dir_path, file_names)
-    if not track_info:
-        return None
-    audio_track = select_best_track(
-        track_info.audio_tracks, 
-        args.audio_languages, 
-        simp_dir_path, 
-        "audio"
-    )
-    subtitle_track = select_best_track(
-        track_info.subtitle_tracks, 
-        args.subtitle_languages, 
-        simp_dir_path, 
-        "subtitle"
-    )
-    should_convert = filter_batch_files(args, dir_path, file_names)
-    if len(should_convert) == 0:
+    convertible_files = filter_convertible_files(args, dir_path, file_names)
+    if len(convertible_files) == 0:
         logging.warning("No videos in '%s' can be converted", simp_dir_path)
         return None
-    return BatchInfo(dir_path, should_convert, audio_track, subtitle_track)
+    track_map = get_track_map(args, dir_path, file_names)
+    return BatchInfo(dir_path, track_map)
 
 
 def generate_batches(args):
@@ -720,7 +725,7 @@ def generate_batches(args):
 def execute_batch(args, batch):
     output_dir = get_output_dir(args.output_dir, args.input_dir, batch.dir_path)
     try_create_directory(output_dir)
-    for file_name in batch.file_names:
+    for file_name, track_info in batch.track_map.iteritems():
         output_file_name = replace_extension(file_name, args.output_format)
         input_path = os.path.join(batch.dir_path, file_name)
         output_path = os.path.join(output_dir, output_file_name)
@@ -729,8 +734,8 @@ def execute_batch(args, batch):
             args.handbrake_path, 
             input_path, 
             output_path, 
-            batch.audio_track, 
-            batch.subtitle_track, 
+            track_info.audio_track, 
+            track_info.subtitle_track, 
             args.output_dimensions
         )
         logging.info("Converting '%s'", simp_input_path)
@@ -765,10 +770,10 @@ def sanitize_and_validate_args(args):
     if args.handbrake_path:
         args.handbrake_path = os.path.abspath(args.handbrake_path)
         if not os.path.isfile(args.handbrake_path):
-            logging.error("HandBrake CLI binary not found: '%s'", args.handbrake_path)
+            logging.error("HandBrakeCLI binary not found: '%s'", args.handbrake_path)
             return False
         if not os.access(args.handbrake_path, os.X_OK):
-            logging.error("HandBrake CLI binary is not executable: '%s'", args.handbrake_path)
+            logging.error("HandBrakeCLI binary is not executable: '%s'", args.handbrake_path)
             return False
     else:
         args.handbrake_path = find_handbrake_executable()
