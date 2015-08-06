@@ -453,8 +453,11 @@ def filter_tracks_by_language(track_list, preferred_languages):
         if len(filtered_tracks) - und_count >= 1:
             return filtered_tracks
         elif len(track_list) == und_count:
-            logging.info("All tracks have undefined language code")
-            return filtered_tracks
+            if und_count == 1:
+                logging.info("Only one track, with undefined language code")
+            else:
+                logging.info("All tracks have undefined language code")
+            return []
     return []
 
 
