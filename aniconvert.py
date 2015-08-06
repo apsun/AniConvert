@@ -671,8 +671,7 @@ def check_output_path(args, output_path):
         logging.error("Output path '%s' is a directory, skipping file", simp_output_path)
         return False
     if args.duplicate_action == "prompt":
-        if not prompt_overwrite_file(simp_output_path):
-            return False
+        return prompt_overwrite_file(simp_output_path)
     elif args.duplicate_action == "skip":
         logging.info("Destination file '%s' already exists, skipping", simp_output_path)
         return False
