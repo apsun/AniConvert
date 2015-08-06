@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 ###############################################################
-# AniConvert: Batch convert directories of videos using 
-# HandBrake. Intended to be used on anime and TV series, 
-# where files downloaded as a batch tend to have the same 
-# track layout. Can also automatically select a single audio 
+# AniConvert: Batch convert directories of videos using
+# HandBrake. Intended to be used on anime and TV series,
+# where files downloaded as a batch tend to have the same
+# track layout. Can also automatically select a single audio
 # and subtitle track based on language preference.
 #
 # Copyright (c) 2015 Andrew Sun (@crossbowffs)
@@ -23,15 +23,15 @@ import subprocess
 # Configuration values, no corresponding command-line args
 ###############################################################
 
-# Name of the HandBrake CLI binary. Set this to the full path 
+# Name of the HandBrake CLI binary. Set this to the full path
 # of the binary if the script cannot find it automatically.
 HANDBRAKE_EXE = "HandBrakeCLI"
 
 # The format string for logging messages
 LOGGING_FORMAT = "[%(levelname)s] %(message)s"
 
-# If no output directory is explicitly specified, the output 
-# files will be placed in a directory with this value appended 
+# If no output directory is explicitly specified, the output
+# files will be placed in a directory with this value appended
 # to the name of the input directory.
 DEFAULT_OUTPUT_SUFFIX = "-converted"
 
@@ -43,7 +43,7 @@ DEFAULT_OUTPUT_SUFFIX = "-converted"
 #   -s <subtitle track>
 #   -w <width>
 #   -l <height>
-# Obviously, do not define anything that would cause HandBrake 
+# Obviously, do not define anything that would cause HandBrake
 # to not convert the video file either.
 HANDBRAKE_ARGS = """
 -E ffaac
@@ -67,33 +67,36 @@ HANDBRAKE_ARGS = """
 # Default values and explanations for command-line args
 ###############################################################
 
-# List of video formats to process. Other file formats in the 
-# input directory will be ignored. On the command line, specify 
+# List of video formats to process. Other file formats in the
+# input directory will be ignored. On the command line, specify
 # as "-i mkv,mp4"
 INPUT_VIDEO_FORMATS = ["mkv", "mp4"]
 
-# The format to convert the videos to. On the command line, 
-# specify as "-j mp4"
+# The format to convert the videos to. Only "mp4", "mkv", and
+# "m4v" are accepted, because those are the only formats that
+# HandBrake can write. On the command line, specify as "-j mp4"
 OUTPUT_VIDEO_FORMAT = "mp4"
 
-# A list of preferred audio languages, ordered from most 
-# to least preferable. If there is only one audio track in the 
-# most preferable language, it will be automatically selected. 
-# If more than one track is in the most preferable language, 
-# you will be prompted to select one. If no tracks are 
-# in the most preferable language, the program will check 
-# the second most preferable language, and so on. This value 
-# should use the iso639-2 (3 letter) language code format. 
-# Also accepted is the value "none", which will cause no track 
-# to be selected.
-# On the command line, specify as "-a jpn,eng"
+# A list of preferred audio languages, ordered from most
+# to least preferable. If there is only one audio track in the
+# most preferable language, it will be automatically selected.
+# If more than one track is in the most preferable language,
+# you will be prompted to select one. If no tracks are
+# in the most preferable language, the program will check
+# the second most preferable language, and so on. This value
+# should use the iso639-2 (3 letter) language code format.
+# You may also specify "none" as one of the items in this list.
+# If it is reached, the track will be discarded. For example,
+# "-a eng,none" will use English audio if it is available, or
+# remove the audio track otherwise. On the command line,
+# specify as "-a jpn,eng"
 AUDIO_LANGUAGES = ["jpn", "eng"]
 
-# This is the same as the preferred audio languages, but 
+# This is the same as the preferred audio languages, but
 # for subtitles. On the command line, specify as "-s eng"
 SUBTITLE_LANGUAGES = ["eng"]
 
-# What to do when the destination file already exists. Can be 
+# What to do when the destination file already exists. Can be
 # one of:
 #    "prompt": Ask the user what to do
 #    "skip": Skip the file and proceed to the next one
@@ -101,22 +104,22 @@ SUBTITLE_LANGUAGES = ["eng"]
 # On the command line, specify as "-w skip"
 DUPLICATE_ACTION = "skip"
 
-# The width and height of the output video, in the format 
-# "1280x720". "1080p" and "720p" are common values and 
-# translate to 1920x1080 and 1280x720, respectively. 
-# A value of "auto" is also accepted, and will preserve 
-# the input video dimensions. On the command line, specify 
+# The width and height of the output video, in the format
+# "1280x720". "1080p" and "720p" are common values and
+# translate to 1920x1080 and 1280x720, respectively.
+# A value of "auto" is also accepted, and will preserve
+# the input video dimensions. On the command line, specify
 # as "-d 1280x720", "-d 720p", or "-d auto"
 OUTPUT_DIMENSIONS = "auto"
 
-# Set this to true to search sub-directories within the input 
-# directory. Files will be output in the correspondingly named 
+# Set this to true to search sub-directories within the input
+# directory. Files will be output in the correspondingly named
 # folder in the destination directory.
 RECURSIVE_SEARCH = False
 
-# The minimum severity for an event to be logged. Levels  
-# from least severe to most servere are "debug", "info", 
-# "warning", "error", and "critical". On the command line, 
+# The minimum severity for an event to be logged. Levels
+# from least severe to most servere are "debug", "info",
+# "warning", "error", and "critical". On the command line,
 # specify as "-l info"
 LOGGING_LEVEL = "info"
 
@@ -130,19 +133,19 @@ except NameError:
     pass
 
 
-class TrackInfo:
+class TrackInfo(object):
     def __init__(self, audio_track, subtitle_track):
         self.audio_track = audio_track
         self.subtitle_track = subtitle_track
 
 
-class BatchInfo:
+class BatchInfo(object):
     def __init__(self, dir_path, track_map):
         self.dir_path = dir_path
         self.track_map = track_map
 
 
-class FFmpegStreamInfo:
+class FFmpegStreamInfo(object):
     def __init__(self, stream_index, codec_type, codec_name, language_code, metadata):
         self.stream_index = stream_index
         self.codec_type = codec_type
@@ -151,7 +154,7 @@ class FFmpegStreamInfo:
         self.metadata = metadata
 
 
-class HandBrakeAudioInfo:
+class HandBrakeAudioInfo(object):
     pattern1 = re.compile(r"(\d+), (.+) \(iso639-2: ([a-z]{3})\)")
     pattern2 = re.compile(r"(\d+), (.+) \(iso639-2: ([a-z]{3})\), (\d+)Hz, (\d+)bps")
 
@@ -184,11 +187,11 @@ class HandBrakeAudioInfo:
 
     def __hash__(self):
         return hash((
-            self.index, 
-            self.description, 
-            self.language_code, 
-            self.sample_rate, 
-            self.language_code, 
+            self.index,
+            self.description,
+            self.language_code,
+            self.sample_rate,
+            self.language_code,
             self.title
         ))
 
@@ -196,16 +199,16 @@ class HandBrakeAudioInfo:
         if not isinstance(other, HandBrakeAudioInfo):
             return False
         return (
-            self.index == other.index and 
-            self.description == other.description and 
-            self.language_code == other.language_code and 
-            self.sample_rate == other.sample_rate and 
-            self.language_code == other.language_code and 
+            self.index == other.index and
+            self.description == other.description and
+            self.language_code == other.language_code and
+            self.sample_rate == other.sample_rate and
+            self.language_code == other.language_code and
             self.title == other.title
         )
 
 
-class HandBrakeSubtitleInfo:
+class HandBrakeSubtitleInfo(object):
     pattern = re.compile(r"(\d+), (.+) \(iso639-2: ([a-z]{3})\) \((\S+)\)\((\S+)\)")
 
     def __init__(self, info_str):
@@ -230,11 +233,11 @@ class HandBrakeSubtitleInfo:
 
     def __hash__(self):
         return hash((
-            self.index, 
-            self.language, 
-            self.language_code, 
-            self.format, 
-            self.source, 
+            self.index,
+            self.language,
+            self.language_code,
+            self.format,
+            self.source,
             self.title
         ))
 
@@ -242,11 +245,11 @@ class HandBrakeSubtitleInfo:
         if not isinstance(other, HandBrakeSubtitleInfo):
             return False
         return (
-            self.index == other.index and 
-            self.language == other.language and 
-            self.language_code == other.language_code and 
-            self.format == other.format and 
-            self.source == other.source and 
+            self.index == other.index and
+            self.language == other.language and
+            self.language_code == other.language_code and
+            self.format == other.format and
+            self.source == other.source and
             self.title == other.title
         )
 
@@ -317,8 +320,8 @@ def try_delete_file(path):
 
 def run_handbrake_scan(handbrake_path, input_path):
     output = subprocess.check_output([
-        handbrake_path, 
-        "-i", input_path, 
+        handbrake_path,
+        "-i", input_path,
         "--scan"
     ], stderr=subprocess.STDOUT)
     return output.decode("utf-8")
@@ -526,7 +529,7 @@ def select_best_track(track_list, preferred_languages, file_name, track_type):
         return prompt_select_track(track_list, filtered_tracks, file_name, track_type)
 
 
-def select_best_track_cached(selected_track_map, track_list, 
+def select_best_track_cached(selected_track_map, track_list,
         preferred_languages, file_name, track_type):
     track_set = tuple(track_list)
     try:
@@ -569,9 +572,9 @@ def process_handbrake_output(process):
                 average_fps = float(match.group(3))
                 estimated_time = match.group(4)
             message = format_str.format(
-                percent=percent_complete, 
-                fps=current_fps, 
-                avg_fps=average_fps, 
+                percent=percent_complete,
+                fps=current_fps,
+                avg_fps=average_fps,
                 eta=estimated_time
             )
             print(message, end="")
@@ -585,9 +588,9 @@ def process_handbrake_output(process):
 def run_handbrake(arg_list):
     logging.debug("HandBrake args: '%s'", subprocess.list2cmdline(arg_list))
     process = subprocess.Popen(
-        arg_list, 
-        stdout=subprocess.PIPE, 
-        stderr=subprocess.STDOUT, 
+        arg_list,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         universal_newlines=True
     )
     try:
@@ -601,7 +604,7 @@ def run_handbrake(arg_list):
         raise subprocess.CalledProcessError(retcode, arg_list)
 
 
-def get_handbrake_args(handbrake_path, input_path, output_path, 
+def get_handbrake_args(handbrake_path, input_path, output_path,
         audio_track, subtitle_track, video_dimensions):
     args = HANDBRAKE_ARGS.replace("\n", " ").strip().split()
     args += ["-i", input_path]
@@ -695,25 +698,25 @@ def get_track_map(args, dir_path, file_names):
         logging.info("Scanning '%s'", file_name)
         file_path = os.path.join(dir_path, file_name)
         audio_tracks, subtitle_tracks = get_track_info(
-            args.handbrake_path, 
+            args.handbrake_path,
             file_path
         )
         selected_audio_track = select_best_track_cached(
-            selected_audio_track_map, 
-            audio_tracks, 
-            args.audio_languages, 
-            file_name, 
+            selected_audio_track_map,
+            audio_tracks,
+            args.audio_languages,
+            file_name,
             "audio"
         )
         selected_subtitle_track = select_best_track_cached(
-            selected_subtitle_track_map, 
-            subtitle_tracks, 
-            args.subtitle_languages, 
-            file_name, 
+            selected_subtitle_track_map,
+            subtitle_tracks,
+            args.subtitle_languages,
+            file_name,
             "subtitle"
         )
         track_map[file_name] = TrackInfo(
-            selected_audio_track, 
+            selected_audio_track,
             selected_subtitle_track
         )
     return track_map
@@ -756,11 +759,11 @@ def execute_batch(args, batch):
         output_path = os.path.join(output_dir, output_file_name)
         simp_input_path = get_simplified_path(args.input_dir, input_path)
         handbrake_args = get_handbrake_args(
-            args.handbrake_path, 
-            input_path, 
-            output_path, 
-            track_info.audio_track, 
-            track_info.subtitle_track, 
+            args.handbrake_path,
+            input_path,
+            output_path,
+            track_info.audio_track,
+            track_info.subtitle_track,
             args.output_dimensions
         )
         logging.info("Converting '%s'", simp_input_path)
@@ -848,10 +851,10 @@ def parse_logging_level(value):
 
 def parse_input_formats(value):
     format_list = value.split(",")
-    for format in format_list:
-        if format.startswith("."):
+    for input_format in format_list:
+        if input_format.startswith("."):
             raise argparse.ArgumentTypeError("Do not specify the leading '.' on input formats")
-        if not format.isalnum():
+        if not input_format.isalnum():
             raise argparse.ArgumentTypeError("Invalid input format: " + repr(format))
     return format_list
 
@@ -870,21 +873,21 @@ def parse_args():
     parser.add_argument("input_dir")
     parser.add_argument("-o", "--output-dir")
     parser.add_argument("-x", "--handbrake-path")
-    parser.add_argument("-r", "--recursive-search", 
+    parser.add_argument("-r", "--recursive-search",
         action="store_true", default=RECURSIVE_SEARCH)
-    parser.add_argument("-i", "--input-formats", 
+    parser.add_argument("-i", "--input-formats",
         type=parse_input_formats, default=INPUT_VIDEO_FORMATS)
-    parser.add_argument("-j", "--output-format", 
+    parser.add_argument("-j", "--output-format",
         type=parse_output_format, default=OUTPUT_VIDEO_FORMAT)
-    parser.add_argument("-l", "--logging-level", 
+    parser.add_argument("-l", "--logging-level",
         type=parse_logging_level, default=LOGGING_LEVEL)
-    parser.add_argument("-w", "--duplicate-action", 
+    parser.add_argument("-w", "--duplicate-action",
         type=parse_duplicate_action, default=DUPLICATE_ACTION)
-    parser.add_argument("-d", "--output-dimensions", 
+    parser.add_argument("-d", "--output-dimensions",
         type=parse_output_dimensions, default=OUTPUT_DIMENSIONS)
-    parser.add_argument("-a", "--audio-languages", 
+    parser.add_argument("-a", "--audio-languages",
         type=parse_language_list, default=AUDIO_LANGUAGES)
-    parser.add_argument("-s", "--subtitle-languages", 
+    parser.add_argument("-s", "--subtitle-languages",
         type=parse_language_list, default=SUBTITLE_LANGUAGES)
     return parser.parse_args()
 
