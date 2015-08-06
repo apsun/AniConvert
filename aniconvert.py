@@ -456,7 +456,7 @@ def filter_tracks_by_language(track_list, preferred_languages):
 
 
 def print_track_list(track_list, file_name, track_type):
-    print("+ Video: '{1}'".format(track_type, file_name))
+    print("+ Video: '{0}'".format(file_name))
     for track in track_list:
         message_format = "   + [{1}] {0} track: {2}"
         print(message_format.format(track_type.capitalize(), track.index, track.title or ""))
@@ -464,7 +464,7 @@ def print_track_list(track_list, file_name, track_type):
 
 
 def prompt_select_track(track_list, filtered_track_list, file_name, track_type):
-    print("Please select {0} track:".format(track_type, file_name))
+    print("Please select {0} track:".format(track_type))
     print_track_list(filtered_track_list, file_name, track_type)
     prompt_format = "Choose a {0} track # (type 'all' to view all choices): "
     alt_prompt_format = "Choose a {0} track # (type 'none' for no track): "
@@ -569,10 +569,10 @@ def process_handbrake_output(process):
                 average_fps = float(match.group(3))
                 estimated_time = match.group(4)
             message = format_str.format(
-                percent = percent_complete, 
-                fps = current_fps, 
-                avg_fps = average_fps, 
-                eta = estimated_time
+                percent=percent_complete, 
+                fps=current_fps, 
+                avg_fps=average_fps, 
+                eta=estimated_time
             )
             print(message, end="")
             blank_count = max(len(prev_message) - len(message), 0)
@@ -665,7 +665,7 @@ def check_output_path(args, output_path):
         logging.error("Output path '%s' is a directory, skipping file", simp_output_path)
         return False
     if args.duplicate_action == "prompt":
-        if not prompt_overwrite_file(relative_output_path):
+        if not prompt_overwrite_file(simp_output_path):
             return False
     elif args.duplicate_action == "skip":
         logging.info("Destination file '%s' already exists, skipping", simp_output_path)
@@ -815,7 +815,7 @@ def parse_output_dimensions(value):
         return (1920, 1080)
     if value_lower == "720p":
         return (1280, 720)
-    match = re.match("^(\d+)x(\d+)$", value_lower)
+    match = re.match(r"^(\d+)x(\d+)$", value_lower)
     if not match:
         raise argparse.ArgumentTypeError("Invalid video dimensions: " + repr(value))
     width = int(match.group(1))
