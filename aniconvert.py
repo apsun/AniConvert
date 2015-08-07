@@ -476,7 +476,7 @@ def prompt_select_track(track_list, filtered_track_list, file_name, track_type):
     print_track_list(filtered_track_list, file_name, track_type)
     prompt_format = "Choose a {0} track # (type 'all' to view all choices): "
     alt_prompt_format = "Choose a {0} track # (type 'none' for no track): "
-    if track_list is filtered_track_list:
+    if len(track_list) == len(filtered_track_list):
         prompt_format = alt_prompt_format
     while True:
         print(prompt_format.format(track_type), end="")
