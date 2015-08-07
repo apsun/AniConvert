@@ -262,7 +262,7 @@ class HandBrakeSubtitleInfo(object):
         )
 
 
-def print_err(message, end="\n", flush=False):
+def print_err(message="", end="\n", flush=False):
     print(message, end=end, file=sys.stderr)
     if flush:
         sys.stderr.flush()
@@ -766,7 +766,7 @@ def generate_batch(args, dir_path, file_names):
     simp_dir_path = get_simplified_path(args.input_dir, dir_path)
     logging.info("Scanning videos in '%s'", simp_dir_path)
     convertible_files = filter_convertible_files(args, dir_path, file_names)
-    track_map = get_track_map(args, dir_path, file_names)
+    track_map = get_track_map(args, dir_path, convertible_files)
     if len(track_map) == 0:
         logging.warning("No videos in '%s' can be converted", simp_dir_path)
         return None
