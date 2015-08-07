@@ -18,6 +18,7 @@ import logging
 import os
 import re
 import subprocess
+import sys
 
 ###############################################################
 # Configuration values, no corresponding command-line args
@@ -261,6 +262,12 @@ class HandBrakeSubtitleInfo(object):
         )
 
 
+def print_err(message, end="\n", flush=False):
+    print(message, end=end, file=sys.stderr)
+    if flush:
+        sys.stderr.flush()
+
+
 def indent_text(text, prefix):
     if isinstance(prefix, int):
         prefix = " " * prefix
@@ -464,26 +471,26 @@ def filter_tracks_by_language(track_list, preferred_languages, auto_select_und_t
 
 
 def print_track_list(track_list, file_name, track_type):
-    print("+ Video: '{0}'".format(file_name))
+    print_err("+ Video: '{0}'".format(file_name))
     for track in track_list:
         message_format = "   + [{1}] {0} track: {2}"
-        print(message_format.format(track_type.capitalize(), track.index, track.title or ""))
-        print(indent_text(str(track), "      + "))
+        print_err(message_format.format(track_type.capitalize(), track.index, track.title or ""))
+        print_err(indent_text(str(track), "      + "))
 
 
 def prompt_select_track(track_list, filtered_track_list, file_name, track_type):
-    print("Please select {0} track:".format(track_type))
+    print_err("Please select {0} track:".format(track_type))
     print_track_list(filtered_track_list, file_name, track_type)
     prompt_format = "Choose a {0} track # (type 'all' to view all choices): "
     alt_prompt_format = "Choose a {0} track # (type 'none' for no track): "
     if len(track_list) == len(filtered_track_list):
         prompt_format = alt_prompt_format
     while True:
-        print(prompt_format.format(track_type), end="")
+        print_err(prompt_format.format(track_type), end="")
         try:
             input_str = input().lower()
         except KeyboardInterrupt:
-            print()
+            print_err(flush=True)
             raise
         if input_str == "all":
             print_track_list(track_list, file_name, track_type)
@@ -494,29 +501,29 @@ def prompt_select_track(track_list, filtered_track_list, file_name, track_type):
         try:
             track_index = int(input_str)
         except ValueError:
-            print("Enter a valid number!")
+            print_err("Enter a valid number!")
             continue
         try:
             return get_track_by_index(track_list, track_index)
         except IndexError:
-            print("Enter a valid index!")
+            print_err("Enter a valid index!")
 
 
 def prompt_overwrite_file(file_name):
-    print("The destination file already exists: '{0}'".format(file_name))
+    print_err("The destination file already exists: '{0}'".format(file_name))
     while True:
-        print("Do you want to overwrite it? (y/n): ", end="")
+        print_err("Do you want to overwrite it? (y/n): ", end="")
         try:
             input_str = input().lower()
         except KeyboardInterrupt:
-            print()
+            print_err(flush=True)
             raise
         if input_str == "y":
             return True
         elif input_str == "n":
             return False
         else:
-            print("Enter either 'y' or 'n'!")
+            print_err("Enter either 'y' or 'n'!")
 
 
 def select_best_track(track_list, preferred_languages, auto_select_und_track,
@@ -554,19 +561,20 @@ def select_best_track_cached(selected_track_map, track_list,
         preferred_languages, auto_select_und_track, file_name, track_type):
     track_set = tuple(track_list)
     try:
-        selected_track = selected_track_map[track_set]
+        track = selected_track_map[track_set]
     except KeyError:
-        selected_track = select_best_track(
+        track = select_best_track(
             track_list,
             preferred_languages,
             auto_select_und_track,
             file_name,
             track_type
         )
-        selected_track_map[track_set] = selected_track
+        selected_track_map[track_set] = track
     else:
-        logging.debug("%s track layout already encountered", track_type.capitalize())
-    return selected_track
+        message_format = "%s track layout already encountered, selecting #%d with language '%s'"
+        logging.debug(message_format, track_type.capitalize(), track.index, track.language_code)
+    return track
 
 
 def process_handbrake_output(process):
@@ -604,12 +612,12 @@ def process_handbrake_output(process):
                 avg_fps=average_fps,
                 eta=estimated_time
             )
-            print(message, end="")
+            print_err(message, end="")
             blank_count = max(len(prev_message) - len(message), 0)
-            print(" " * blank_count, end="\r")
+            print_err(" " * blank_count, end="\r")
             prev_message = message
     finally:
-        print()
+        print_err(flush=True)
 
 
 def run_handbrake(arg_list):
@@ -935,7 +943,7 @@ def parse_args():
 
 def main():
     args = parse_args()
-    logging.basicConfig(format=LOGGING_FORMAT, level=args.logging_level)
+    logging.basicConfig(format=LOGGING_FORMAT, level=args.logging_level, stream=sys.stdout)
     if not sanitize_and_validate_args(args):
         return
     batches = generate_batches(args)
