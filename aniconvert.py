@@ -112,16 +112,23 @@ DUPLICATE_ACTION = "skip"
 # as "-d 1280x720", "-d 720p", or "-d auto"
 OUTPUT_DIMENSIONS = "auto"
 
-# Set this to true to search sub-directories within the input
-# directory. Files will be output in the correspondingly named
-# folder in the destination directory.
-RECURSIVE_SEARCH = False
-
 # The minimum severity for an event to be logged. Levels
 # from least severe to most servere are "debug", "info",
 # "warning", "error", and "critical". On the command line,
 # specify as "-l info"
 LOGGING_LEVEL = "info"
+
+# If this is true, you will not be prompted to select a track
+# if there is only one track, and it has an undefined language
+# code. This is helpful if you already know the language of the
+# track. On the command line, specify as "-u"
+AUTO_SELECT_UND_TRACK = False
+
+# Set this to true to search sub-directories within the input
+# directory. Files will be output in the correspondingly named
+# folder in the destination directory. On the command line,
+# specify as "-r"
+RECURSIVE_SEARCH = False
 
 ###############################################################
 # End of configuration values, code begins here
@@ -353,8 +360,8 @@ def parse_ffmpeg_stream_metadata(output_lines, start_index, metadata_pattern):
 
 
 def parse_ffmpeg_stream_info(output_lines, start_index):
-    stream_pattern = re.compile(r"    Stream #0.(\d+)(\(([a-z]{3})\))?: (\S+): (\S+?)")
-    metadata_pattern = re.compile(r"      (\S+)\s+: (.+)")
+    stream_pattern = re.compile(r"\s{4}Stream #0\.(\d+)(\(([a-z]{3})\))?: (\S+): (\S+?)")
+    metadata_pattern = re.compile(r"\s{6}(\S+)\s*: (.+)")
     audio_streams = []
     subtitle_streams = []
     i = start_index + 1
@@ -398,7 +405,6 @@ def parse_handbrake_scan_output(output):
     hb_subtitle_tracks = None
     ff_audio_streams = None
     ff_subtitle_streams = None
-    incremented = False
     i = 0
     while i < len(lines):
         if lines[i].startswith("Input #0, "):
@@ -406,20 +412,18 @@ def parse_handbrake_scan_output(output):
             i, ff_audio_streams, ff_subtitle_streams = parse_ffmpeg_stream_info(lines, i)
             message_format = "FFmpeg: %d audio track(s), %d subtitle track(s)"
             logging.debug(message_format, len(ff_audio_streams), len(ff_subtitle_streams))
-            incremented = True
+            continue
         if lines[i] == "  + audio tracks:":
             logging.debug("Found HandBrake audio track info")
             i, hb_audio_tracks = parse_handbrake_track_info(lines, i, HandBrakeAudioInfo)
             logging.debug("HandBrake: %d audio track(s)", len(hb_audio_tracks))
-            incremented = True
+            continue
         if lines[i] == "  + subtitle tracks:":
             logging.debug("Found HandBrake subtitle track info")
             i, hb_subtitle_tracks = parse_handbrake_track_info(lines, i, HandBrakeSubtitleInfo)
             logging.debug("HandBrake: %d subtitle track(s)", len(hb_subtitle_tracks))
-            incremented = True
-        if not incremented:
-            i += 1
-        incremented = False
+            continue
+        i += 1
     merge_track_titles(hb_audio_tracks, ff_audio_streams)
     merge_track_titles(hb_subtitle_tracks, ff_subtitle_streams)
     return (hb_audio_tracks, hb_subtitle_tracks)
@@ -437,7 +441,7 @@ def get_track_by_index(track_list, track_index):
     raise IndexError("Invalid track index: " + str(track_index))
 
 
-def filter_tracks_by_language(track_list, preferred_languages):
+def filter_tracks_by_language(track_list, preferred_languages, auto_select_und_track):
     for preferred_language_code in preferred_languages:
         preferred_language_code = preferred_language_code.lower()
         if preferred_language_code == "none":
@@ -453,10 +457,8 @@ def filter_tracks_by_language(track_list, preferred_languages):
         if len(filtered_tracks) - und_count >= 1:
             return filtered_tracks
         elif len(track_list) == und_count:
-            if und_count == 1:
-                logging.info("Only one track, with undefined language code")
-            else:
-                logging.info("All tracks have undefined language code")
+            if und_count == 1 and auto_select_und_track:
+                return track_list
             return []
     return []
 
@@ -474,11 +476,15 @@ def prompt_select_track(track_list, filtered_track_list, file_name, track_type):
     print_track_list(filtered_track_list, file_name, track_type)
     prompt_format = "Choose a {0} track # (type 'all' to view all choices): "
     alt_prompt_format = "Choose a {0} track # (type 'none' for no track): "
-    if len(track_list) == len(filtered_track_list):
+    if track_list is filtered_track_list:
         prompt_format = alt_prompt_format
     while True:
         print(prompt_format.format(track_type), end="")
-        input_str = input().lower()
+        try:
+            input_str = input().lower()
+        except KeyboardInterrupt:
+            print()
+            raise
         if input_str == "all":
             print_track_list(track_list, file_name, track_type)
             prompt_format = alt_prompt_format
@@ -500,7 +506,11 @@ def prompt_overwrite_file(file_name):
     print("The destination file already exists: '{0}'".format(file_name))
     while True:
         print("Do you want to overwrite it? (y/n): ", end="")
-        input_str = input().lower()
+        try:
+            input_str = input().lower()
+        except KeyboardInterrupt:
+            print()
+            raise
         if input_str == "y":
             return True
         elif input_str == "n":
@@ -509,11 +519,16 @@ def prompt_overwrite_file(file_name):
             print("Enter either 'y' or 'n'!")
 
 
-def select_best_track(track_list, preferred_languages, file_name, track_type):
+def select_best_track(track_list, preferred_languages, auto_select_und_track,
+        file_name, track_type):
     if len(track_list) == 0:
         logging.info("No %s tracks found", track_type)
         return None
-    filtered_tracks = filter_tracks_by_language(track_list, preferred_languages)
+    filtered_tracks = filter_tracks_by_language(
+        track_list,
+        preferred_languages,
+        auto_select_und_track
+    )
     if filtered_tracks is None:
         logging.info("Matched 'none' language, discarding %s track", track_type)
         return None
@@ -533,12 +548,18 @@ def select_best_track(track_list, preferred_languages, file_name, track_type):
 
 
 def select_best_track_cached(selected_track_map, track_list,
-        preferred_languages, file_name, track_type):
+        preferred_languages, auto_select_und_track, file_name, track_type):
     track_set = tuple(track_list)
     try:
         selected_track = selected_track_map[track_set]
     except KeyError:
-        selected_track = select_best_track(track_list, preferred_languages, file_name, track_type)
+        selected_track = select_best_track(
+            track_list,
+            preferred_languages,
+            auto_select_und_track,
+            file_name,
+            track_type
+        )
         selected_track_map[track_set] = selected_track
     else:
         logging.debug("%s track layout already encountered", track_type.capitalize())
@@ -707,6 +728,7 @@ def get_track_map(args, dir_path, file_names):
             selected_audio_track_map,
             audio_tracks,
             args.audio_languages,
+            args.auto_select_und_track,
             file_name,
             "audio"
         )
@@ -714,6 +736,7 @@ def get_track_map(args, dir_path, file_names):
             selected_subtitle_track_map,
             subtitle_tracks,
             args.subtitle_languages,
+            args.auto_select_und_track,
             file_name,
             "subtitle"
         )
@@ -812,6 +835,10 @@ def sanitize_and_validate_args(args):
     return True
 
 
+def arg_error(message):
+    raise argparse.ArgumentTypeError(message)
+
+
 def parse_output_dimensions(value):
     value_lower = value.lower()
     if value_lower == "auto":
@@ -822,7 +849,7 @@ def parse_output_dimensions(value):
         return (1280, 720)
     match = re.match(r"^(\d+)x(\d+)$", value_lower)
     if not match:
-        raise argparse.ArgumentTypeError("Invalid video dimensions: " + repr(value))
+        arg_error("Invalid video dimensions: " + repr(value))
     width = int(match.group(1))
     height = int(match.group(2))
     return (width, height)
@@ -831,23 +858,27 @@ def parse_output_dimensions(value):
 def parse_duplicate_action(value):
     value_lower = value.lower()
     if value_lower not in {"prompt", "skip", "overwrite"}:
-        raise argparse.ArgumentTypeError("Invalid duplicate action: " + repr(value))
+        arg_error("Invalid duplicate action: " + repr(value))
     return value_lower
 
 
 def parse_language_list(value):
     language_list = value.split(",")
     for language in language_list:
-        if not language.isalpha() or (len(language) != 3 and language.lower() != "none"):
-            raise argparse.ArgumentTypeError("Invalid iso639-2 code: " + repr(language))
-        # TODO: Maybe add some real validation here?
+        language = language.lower()
+        if language == "none":
+            continue
+        elif language == "und":
+            arg_error("Do not specify 'und' language, use '-u' flag instead")
+        elif not language.isalpha() or len(language) != 3:
+            arg_error("Invalid iso639-2 code: " + repr(language))
     return language_list
 
 
 def parse_logging_level(value):
     level = getattr(logging, value.upper(), None)
     if level is None:
-        raise argparse.ArgumentTypeError("Invalid logging level: " + repr(value))
+        arg_error("Invalid logging level: " + repr(value))
     return level
 
 
@@ -855,18 +886,17 @@ def parse_input_formats(value):
     format_list = value.split(",")
     for input_format in format_list:
         if input_format.startswith("."):
-            raise argparse.ArgumentTypeError("Do not specify the leading '.' on input formats")
+            arg_error("Do not specify the leading '.' on input formats")
         if not input_format.isalnum():
-            raise argparse.ArgumentTypeError("Invalid input format: " + repr(format))
+            arg_error("Invalid input format: " + repr(input_format))
     return format_list
 
 
 def parse_output_format(value):
     if value.startswith("."):
-        raise argparse.ArgumentTypeError("Do not specify the leading '.' on output format")
+        arg_error("Do not specify the leading '.' on output format")
     if value.lower() not in {"mp4", "mkv", "m4v"}:
-        message = "Invalid output format (only mp4, mkv, and m4v are supported): " + repr(value)
-        raise argparse.ArgumentTypeError(message)
+        arg_error("Invalid output format (only mp4, mkv, and m4v are supported): " + repr(value))
     return value
 
 
@@ -877,6 +907,8 @@ def parse_args():
     parser.add_argument("-x", "--handbrake-path")
     parser.add_argument("-r", "--recursive-search",
         action="store_true", default=RECURSIVE_SEARCH)
+    parser.add_argument("-u", "--auto-select-und-track",
+        action="store_true", default=AUTO_SELECT_UND_TRACK)
     parser.add_argument("-i", "--input-formats",
         type=parse_input_formats, default=INPUT_VIDEO_FORMATS)
     parser.add_argument("-j", "--output-format",

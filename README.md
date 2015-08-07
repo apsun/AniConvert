@@ -51,10 +51,11 @@ a folder of videos that you know are in the same format. This script aims to
 solve that problem, while also providing extra automation such as language
 priority for your audio and subtitle tracks.
 
-### Why am I still prompted to select a track after setting my language preferences?
+### Why am I being asked to select a track, even though there is only one option?
 
-This may occur if the track's language code is undefined. As a workaround,
-add `und` to your language list. For example, `-s eng` becomes `-s eng,und`.
+This occurs when the track's language does not match any of the items in the
+preferred languages list. If the track's language is undefined (`und`), you
+can bypass the prompt by specifying the `-u` option.
 
 ### Why are my subtitles burned into the video?
 
