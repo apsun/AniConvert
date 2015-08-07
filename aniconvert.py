@@ -577,9 +577,9 @@ def select_best_track_cached(selected_track_map, track_list,
         selected_track_map[track_set] = track
     else:
         track_type = track_type.capitalize()
-        message_format = "%s track layout already encountered, "
+        message_format = "%s track layout already seen, "
         if track:
-            message_format += "selecting #%d with language '%s'"
+            message_format += "selected #%d with language '%s'"
             logging.debug(message_format, track_type, track.index, track.language_code)
         else:
             message_format += "no track selected"
