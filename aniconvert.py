@@ -534,17 +534,20 @@ def select_best_track(track_list, preferred_languages, auto_select_und_track,
         return None
     if len(filtered_tracks) == 1:
         track = filtered_tracks[0]
-        message_format = "Automatically selected %s track with language '%s'"
-        logging.info(message_format, track_type, track.language_code)
+        message_format = "Automatically selected %s track #%d with language '%s'"
+        logging.info(message_format, track_type, track.index, track.language_code)
         return track
-    if len(filtered_tracks) == 0:
-        message_format = "Failed to find any %s tracks that match language list: %s"
-        logging.info(message_format, track_type, preferred_languages)
-        return prompt_select_track(track_list, track_list, file_name, track_type)
     else:
-        message_format = "More than one %s track matches language list: %s"
+        if len(filtered_tracks) == 0:
+            filtered_tracks = track_list
+            message_format = "Failed to find any %s tracks that match language list: %s"
+        else:
+            message_format = "More than one %s track matches language list: %s"
         logging.info(message_format, track_type, preferred_languages)
-        return prompt_select_track(track_list, filtered_tracks, file_name, track_type)
+        track = prompt_select_track(track_list, filtered_tracks, file_name, track_type)
+        message_format = "User selected %s track #%d with language '%s'"
+        logging.info(message_format, track_type, track.index, track.language_code)
+        return track
 
 
 def select_best_track_cached(selected_track_map, track_list,
@@ -720,10 +723,14 @@ def get_track_map(args, dir_path, file_names):
     for file_name in file_names:
         logging.info("Scanning '%s'", file_name)
         file_path = os.path.join(dir_path, file_name)
-        audio_tracks, subtitle_tracks = get_track_info(
-            args.handbrake_path,
-            file_path
-        )
+        try:
+            audio_tracks, subtitle_tracks = get_track_info(
+                args.handbrake_path,
+                file_path
+            )
+        except subprocess.CalledProcessError as e:
+            logging.error("Error occurred while scanning '%s': %s", file_name, e)
+            continue
         selected_audio_track = select_best_track_cached(
             selected_audio_track_map,
             audio_tracks,
@@ -751,10 +758,10 @@ def generate_batch(args, dir_path, file_names):
     simp_dir_path = get_simplified_path(args.input_dir, dir_path)
     logging.info("Scanning videos in '%s'", simp_dir_path)
     convertible_files = filter_convertible_files(args, dir_path, file_names)
-    if len(convertible_files) == 0:
+    track_map = get_track_map(args, dir_path, file_names)
+    if len(track_map) == 0:
         logging.warning("No videos in '%s' can be converted", simp_dir_path)
         return None
-    track_map = get_track_map(args, dir_path, file_names)
     return BatchInfo(dir_path, track_map)
 
 
