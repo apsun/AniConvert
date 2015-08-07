@@ -445,10 +445,10 @@ def filter_tracks_by_language(track_list, preferred_languages):
         und_count = 0
         filtered_tracks = []
         for track in track_list:
-            if track.language_code == "und":
-                und_count += 1
+            if track.language_code == preferred_language_code:
                 filtered_tracks.append(track)
-            elif track.language_code == preferred_language_code:
+            elif track.language_code == "und":
+                und_count += 1
                 filtered_tracks.append(track)
         if len(filtered_tracks) - und_count >= 1:
             return filtered_tracks
