@@ -471,10 +471,11 @@ def filter_tracks_by_language(track_list, preferred_languages, auto_select_und_t
 
 
 def print_track_list(track_list, file_name, track_type):
+    track_type = track_type.capitalize()
     print_err("+ Video: '{0}'".format(file_name))
     for track in track_list:
         message_format = "   + [{1}] {0} track: {2}"
-        print_err(message_format.format(track_type.capitalize(), track.index, track.title or ""))
+        print_err(message_format.format(track_type, track.index, track.title or ""))
         print_err(indent_text(str(track), "      + "))
 
 
@@ -552,8 +553,11 @@ def select_best_track(track_list, preferred_languages, auto_select_und_track,
             message_format = "More than one %s track matches language list: %s"
         logging.info(message_format, track_type, preferred_languages)
         track = prompt_select_track(track_list, filtered_tracks, file_name, track_type)
-        message_format = "User selected %s track #%d with language '%s'"
-        logging.info(message_format, track_type, track.index, track.language_code)
+        if track:
+            message_format = "User selected %s track #%d with language '%s'"
+            logging.info(message_format, track_type, track.index, track.language_code)
+        else:
+            logging.info("User discarded %s track", track_type)
         return track
 
 
@@ -572,8 +576,14 @@ def select_best_track_cached(selected_track_map, track_list,
         )
         selected_track_map[track_set] = track
     else:
-        message_format = "%s track layout already encountered, selecting #%d with language '%s'"
-        logging.debug(message_format, track_type.capitalize(), track.index, track.language_code)
+        track_type = track_type.capitalize()
+        message_format = "%s track layout already encountered, "
+        if track:
+            message_format += "selecting #%d with language '%s'"
+            logging.debug(message_format, track_type, track.index, track.language_code)
+        else:
+            message_format += "no track selected"
+            logging.debug(message_format, track_type)
     return track
 
 
