@@ -275,9 +275,13 @@ def indent_text(text, prefix):
     return "\n".join(prefix + line for line in lines)
 
 
+def on_walk_error(exception):
+    logging.error("Cannot read directory: '%s'", exception.filename)
+
+
 def get_files_in_dir(path, extensions, recursive):
     extensions = {e.lower() for e in extensions}
-    for (dir_path, subdir_names, file_names) in os.walk(path):
+    for (dir_path, subdir_names, file_names) in os.walk(path, onerror=on_walk_error):
         filtered_files = []
         for file_name in file_names:
             extension = os.path.splitext(file_name)[1][1:]
@@ -532,11 +536,8 @@ def select_best_track(track_list, preferred_languages, auto_select_und_track,
     if len(track_list) == 0:
         logging.info("No %s tracks found", track_type)
         return None
-    filtered_tracks = filter_tracks_by_language(
-        track_list,
-        preferred_languages,
-        auto_select_und_track
-    )
+    filtered_tracks = filter_tracks_by_language(track_list,
+        preferred_languages, auto_select_und_track)
     if filtered_tracks is None:
         logging.info("Matched 'none' language, discarding %s track", track_type)
         return None
@@ -567,13 +568,8 @@ def select_best_track_cached(selected_track_map, track_list,
     try:
         track = selected_track_map[track_set]
     except KeyError:
-        track = select_best_track(
-            track_list,
-            preferred_languages,
-            auto_select_und_track,
-            file_name,
-            track_type
-        )
+        track = select_best_track(track_list, preferred_languages,
+            auto_select_und_track, file_name, track_type)
         selected_track_map[track_set] = track
     else:
         track_type = track_type.capitalize()
@@ -591,8 +587,7 @@ def process_handbrake_output(process):
     pattern1 = re.compile(r"Encoding: task \d+ of \d+, (\d+\.\d\d) %")
     pattern2 = re.compile(
         r"Encoding: task \d+ of \d+, (\d+\.\d\d) % "
-        r"\((\d+\.\d\d) fps, avg (\d+\.\d\d) fps, ETA (\d\dh\d\dm\d\ds)\)"
-    )
+        r"\((\d+\.\d\d) fps, avg (\d+\.\d\d) fps, ETA (\d\dh\d\dm\d\ds)\)")
     percent_complete = None
     current_fps = None
     average_fps = None
@@ -620,8 +615,7 @@ def process_handbrake_output(process):
                 percent=percent_complete,
                 fps=current_fps,
                 avg_fps=average_fps,
-                eta=estimated_time
-            )
+                eta=estimated_time)
             print_err(message, end="")
             blank_count = max(len(prev_message) - len(message), 0)
             print_err(" " * blank_count, end="\r")
@@ -636,8 +630,7 @@ def run_handbrake(arg_list):
         arg_list,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        universal_newlines=True
-    )
+        universal_newlines=True)
     try:
         process_handbrake_output(process)
     except:
@@ -724,6 +717,10 @@ def check_output_path(args, output_path):
 
 def filter_convertible_files(args, dir_path, file_names):
     output_dir = get_output_dir(args.output_dir, args.input_dir, dir_path)
+    parent_dir = os.path.dirname(output_dir)
+    if not os.access(parent_dir, os.W_OK | os.X_OK):
+        logging.error("Cannot create output directory: '%s'", output_dir)
+        return []
     convertible_files = []
     for file_name in file_names:
         output_file_name = replace_extension(file_name, args.output_format)
@@ -743,32 +740,20 @@ def get_track_map(args, dir_path, file_names):
         file_path = os.path.join(dir_path, file_name)
         try:
             audio_tracks, subtitle_tracks = get_track_info(
-                args.handbrake_path,
-                file_path
-            )
+                args.handbrake_path, file_path)
         except subprocess.CalledProcessError as e:
             logging.error("Error occurred while scanning '%s': %s", file_name, e)
             continue
         selected_audio_track = select_best_track_cached(
-            selected_audio_track_map,
-            audio_tracks,
-            args.audio_languages,
-            args.auto_select_und_track,
-            file_name,
-            "audio"
-        )
+            selected_audio_track_map, audio_tracks,
+            args.audio_languages, args.auto_select_und_track,
+            file_name, "audio")
         selected_subtitle_track = select_best_track_cached(
-            selected_subtitle_track_map,
-            subtitle_tracks,
-            args.subtitle_languages,
-            args.auto_select_und_track,
-            file_name,
-            "subtitle"
-        )
+            selected_subtitle_track_map, subtitle_tracks,
+            args.subtitle_languages, args.auto_select_und_track,
+            file_name, "subtitle")
         track_map[file_name] = TrackInfo(
-            selected_audio_track,
-            selected_subtitle_track
-        )
+            selected_audio_track, selected_subtitle_track)
     return track_map
 
 
@@ -796,7 +781,7 @@ def generate_batches(args):
         message = "No videos found in input directory"
         if not args.recursive_search:
             message += ", for recursive search specify '-r'"
-        logging.error(message)
+        logging.info(message)
     return batch_list
 
 
@@ -808,14 +793,9 @@ def execute_batch(args, batch):
         input_path = os.path.join(batch.dir_path, file_name)
         output_path = os.path.join(output_dir, output_file_name)
         simp_input_path = get_simplified_path(args.input_dir, input_path)
-        handbrake_args = get_handbrake_args(
-            args.handbrake_path,
-            input_path,
-            output_path,
-            track_info.audio_track,
-            track_info.subtitle_track,
-            args.output_dimensions
-        )
+        handbrake_args = get_handbrake_args(args.handbrake_path,
+            input_path, output_path, track_info.audio_track,
+            track_info.subtitle_track, args.output_dimensions)
         logging.info("Converting '%s'", simp_input_path)
         try:
             run_handbrake(handbrake_args)
@@ -839,8 +819,20 @@ def sanitize_and_validate_args(args):
     if os.path.isfile(args.input_dir):
         logging.error("Input directory is a file: '%s'", args.input_dir)
         return False
+    if not os.access(args.input_dir, os.R_OK | os.X_OK):
+        logging.error("Cannot read from input directory: '%s'", args.input_dir)
+        return False
     if os.path.isfile(args.output_dir):
         logging.error("Output directory is a file: '%s'", args.output_dir)
+        return False
+    if os.path.isdir(args.output_dir):
+        # TODO: Do we need read access here too?
+        if not os.access(args.output_dir, os.W_OK | os.X_OK):
+            logging.error("Cannot write to output directory: '%s'", args.output_dir)
+            return False
+    elif not os.access(os.path.dirname(args.output_dir), os.W_OK | os.X_OK):
+        # TODO: Do we need both w+x access to create subdirs?
+        logging.error("Cannot create output directory: '%s'", args.output_dir)
         return False
     if args.input_dir == args.output_dir:
         logging.error("Input and output directories are the same: '%s'", args.input_dir)
