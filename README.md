@@ -51,12 +51,6 @@ a folder of videos that you know are in the same format. This script aims to
 solve that problem, while also providing extra automation such as language
 priority for your audio and subtitle tracks.
 
-### Why am I being asked to select a track, even though there is only one option?
-
-This occurs when the track's language does not match any of the items in the
-preferred languages list. If the track's language is undefined (`und`), you
-can bypass the prompt by specifying the `-u` option.
-
 ### Why are my subtitles burned into the video?
 
 Again, this script was written with anime in mind, where subtitles tend to
