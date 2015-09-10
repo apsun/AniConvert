@@ -119,11 +119,11 @@ OUTPUT_DIMENSIONS = "auto"
 # specify as "-l info"
 LOGGING_LEVEL = "info"
 
-# If this is true, you will not be prompted to select a track
-# if there is only one track, and it has an undefined language
-# code. This is helpful if you already know the language of the
-# track. On the command line, specify as "-u"
-AUTO_SELECT_UND_TRACK = False
+# By default, if there is only a single track, and it has
+# language code "und" (undefined), it will automatically be
+# selected. If you do not want this behavior, set this flag
+# to true. On the command line, specify as "-u"
+MANUAL_UND = False
 
 # Set this to true to search sub-directories within the input
 # directory. Files will be output in the correspondingly named
@@ -452,7 +452,7 @@ def get_track_by_index(track_list, track_index):
     raise IndexError("Invalid track index: " + str(track_index))
 
 
-def filter_tracks_by_language(track_list, preferred_languages, auto_select_und_track):
+def filter_tracks_by_language(track_list, preferred_languages, manual_und):
     for preferred_language_code in preferred_languages:
         preferred_language_code = preferred_language_code.lower()
         if preferred_language_code == "none":
@@ -468,7 +468,7 @@ def filter_tracks_by_language(track_list, preferred_languages, auto_select_und_t
         if len(filtered_tracks) - und_count >= 1:
             return filtered_tracks
         elif len(track_list) == und_count:
-            if und_count == 1 and auto_select_und_track:
+            if und_count == 1 and not manual_und:
                 return track_list
             return []
     return []
@@ -531,13 +531,13 @@ def prompt_overwrite_file(file_name):
             print_err("Enter either 'y' or 'n'!")
 
 
-def select_best_track(track_list, preferred_languages, auto_select_und_track,
+def select_best_track(track_list, preferred_languages, manual_und,
         file_name, track_type):
     if len(track_list) == 0:
         logging.info("No %s tracks found", track_type)
         return None
     filtered_tracks = filter_tracks_by_language(track_list,
-        preferred_languages, auto_select_und_track)
+        preferred_languages, manual_und)
     if filtered_tracks is None:
         logging.info("Matched 'none' language, discarding %s track", track_type)
         return None
@@ -563,13 +563,13 @@ def select_best_track(track_list, preferred_languages, auto_select_und_track,
 
 
 def select_best_track_cached(selected_track_map, track_list,
-        preferred_languages, auto_select_und_track, file_name, track_type):
+        preferred_languages, manual_und, file_name, track_type):
     track_set = tuple(track_list)
     try:
         track = selected_track_map[track_set]
     except KeyError:
         track = select_best_track(track_list, preferred_languages,
-            auto_select_und_track, file_name, track_type)
+            manual_und, file_name, track_type)
         selected_track_map[track_set] = track
     else:
         track_type = track_type.capitalize()
@@ -746,11 +746,11 @@ def get_track_map(args, dir_path, file_names):
             continue
         selected_audio_track = select_best_track_cached(
             selected_audio_track_map, audio_tracks,
-            args.audio_languages, args.auto_select_und_track,
+            args.audio_languages, args.manual_und,
             file_name, "audio")
         selected_subtitle_track = select_best_track_cached(
             selected_subtitle_track_map, subtitle_tracks,
-            args.subtitle_languages, args.auto_select_und_track,
+            args.subtitle_languages, args.manual_und,
             file_name, "subtitle")
         track_map[file_name] = TrackInfo(
             selected_audio_track, selected_subtitle_track)
@@ -924,8 +924,8 @@ def parse_args():
     parser.add_argument("-x", "--handbrake-path")
     parser.add_argument("-r", "--recursive-search",
         action="store_true", default=RECURSIVE_SEARCH)
-    parser.add_argument("-u", "--auto-select-und-track",
-        action="store_true", default=AUTO_SELECT_UND_TRACK)
+    parser.add_argument("-u", "--manual-und",
+        action="store_true", default=MANUAL_UND)
     parser.add_argument("-i", "--input-formats",
         type=parse_input_formats, default=INPUT_VIDEO_FORMATS)
     parser.add_argument("-j", "--output-format",
