@@ -717,8 +717,9 @@ def check_output_path(args, output_path):
 
 def filter_convertible_files(args, dir_path, file_names):
     output_dir = get_output_dir(args.output_dir, args.input_dir, dir_path)
-    parent_dir = os.path.dirname(output_dir)
-    if not os.access(parent_dir, os.W_OK | os.X_OK):
+    try:
+        try_create_directory(output_dir)
+    except OSError as e:
         logging.error("Cannot create output directory: '%s'", output_dir)
         return []
     convertible_files = []
@@ -825,14 +826,8 @@ def sanitize_and_validate_args(args):
     if os.path.isfile(args.output_dir):
         logging.error("Output directory is a file: '%s'", args.output_dir)
         return False
-    if os.path.isdir(args.output_dir):
-        # TODO: Do we need read access here too?
-        if not os.access(args.output_dir, os.W_OK | os.X_OK):
-            logging.error("Cannot write to output directory: '%s'", args.output_dir)
-            return False
-    elif not os.access(os.path.dirname(args.output_dir), os.W_OK | os.X_OK):
-        # TODO: Do we need both w+x access to create subdirs?
-        logging.error("Cannot create output directory: '%s'", args.output_dir)
+    if os.path.isdir(args.output_dir) and not os.access(args.output_dir, os.W_OK | os.X_OK):
+        logging.error("Cannot write to output directory: '%s'", args.output_dir)
         return False
     if args.input_dir == args.output_dir:
         logging.error("Input and output directories are the same: '%s'", args.input_dir)
