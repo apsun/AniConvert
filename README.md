@@ -43,7 +43,15 @@ All of this script's information comes from parsing the output that
 HandBrake produces. If HandBrake works, this script will too. No external
 libraries are used by the script itself, but may be required by HandBrake.
 
-### Why is this better than the official HandBrake GUI?
+### Why would I need this?
+
+If you are watching your videos on a powerful computer, you probably don't.
+However, if you are using an older device, or want to save some disk space,
+then converting your videos using HandBrake is a good idea. Your videos will
+be smaller (200-300MB for a typical episode of anime at 720p), and you will
+be able to utilize H.264 hardware acceleration on devices that support it.
+
+### How is this better than the official HandBrake GUI?
 
 The official HandBrake app requires that you apply your audio and subtitle
 preferences to each video file individually, which is annoying if you have
