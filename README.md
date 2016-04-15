@@ -17,6 +17,11 @@ Yet another batch file converter for [HandBrake](https://handbrake.fr/)
 - [Python](https://www.python.org/downloads/) 2.7 or above (Python 3 is supported)
 - A folder full of videos to convert!
 
+## Usage notes
+
+If HandBrakeCLI is not in your PATH, you may place it in the same directory as
+the script, or specify the path manually.
+
 ## Example usage
 
 - Convert a folder of videos using default settings: `aniconvert.py path/to/folder`

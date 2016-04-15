@@ -789,7 +789,7 @@ def generate_batches(args):
 def execute_batch(args, batch):
     output_dir = get_output_dir(args.output_dir, args.input_dir, batch.dir_path)
     try_create_directory(output_dir)
-    for file_name, track_info in batch.track_map.iteritems():
+    for file_name, track_info in batch.track_map.items():
         output_file_name = replace_extension(file_name, args.output_format)
         input_path = os.path.join(batch.dir_path, file_name)
         output_path = os.path.join(output_dir, output_file_name)
